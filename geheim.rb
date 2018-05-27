@@ -126,12 +126,21 @@ class Index < CommitFile
     end
   end
 
+  def is_binary?
+    if @description.include?(".txt")
+      false
+    else
+      @description.include?(".")
+    end
+  end
+
   def get_data(data: nil)
     GeheimData.new(data_file: @data_file, data: data)
   end
 
   def to_s
-    "=> #{@description} <= ...#{@hash[-11...-1]}\n"
+    binary = is_binary? ? "(BINARY) " : ""
+    "=> #{@description} #{binary}<= ...#{@hash[-11...-1]}\n"
   end
 
   def <=>(other)
@@ -165,7 +174,7 @@ class Geheim < Config
     end
     indexes.sort.each do |index|
       print index
-      print index.get_data if show
+      print index.get_data if show and !index.is_binary?
     end
   end
 
