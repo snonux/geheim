@@ -99,6 +99,11 @@ class GeheimData < CommitFile
     "#{@data}\n"
   end
 
+  def rm
+    puts "Deleting #{@data_path}"
+    File.unlink(@data_path)
+  end
+
   def commit
     commit_content(file: @data_path, content: encrypt(plain: @data))
   end
@@ -121,12 +126,21 @@ class Index < CommitFile
     end
   end
 
+  def get_data(data: nil)
+    GeheimData.new(data_file: @data_file, data: data)
+  end
+
   def to_s
     "=> #{@description} <= ...#{@hash[-11...-1]}\n"
   end
 
   def <=>(other)
     @description <=> other.description
+  end
+
+  def rm
+    puts "Deleting #{@index_path}"
+    File.unlink(@index_path)
   end
 
   def commit
@@ -151,7 +165,7 @@ class Geheim < Config
     end
     indexes.sort.each do |index|
       print index
-      print GeheimData.new(data_file: index.data_file) if show
+      print index.get_data if show
     end
   end
 
@@ -161,11 +175,33 @@ class Geheim < Config
     print "Data: "
     data = $stdin.gets.chomp
 
-    data = GeheimData.new(data_file: "#{hash}.data", data: data)
     index = Index.new(index_file: "#{hash}.index", description: description)
+    data = index.get_data(data: data)
 
     data.commit
     index.commit
+  end
+
+  def rm(search_term:)
+    indexes = Array.new
+    walk_indexes(search_term: search_term) do |index|
+      indexes << index
+    end
+    indexes.sort.each do |index|
+      loop do
+        print index
+        print "You really want to delete this? (y/n): "
+        case $stdin.gets.chomp
+        when 'y'
+          data = index.get_data
+          data.rm
+          index.rm
+          break
+        when 'n'
+          break
+        end
+      end
+    end
   end
 
   private def walk_indexes(search_term:)
@@ -191,6 +227,7 @@ class Geheim < Config
         geheim SEARCHTERM
         geheim show SEARCHTERM
         geheim add DESCRIPTION
+        geheim rm SEARCHTERM
         geheim help
     END
   end
@@ -207,6 +244,8 @@ begin
     geheim.ls(search_term: ARGV[1], show: true)
   when 'add'
     geheim.add(description: ARGV[1])
+  when 'rm'
+    geheim.rm(search_term: ARGV[1])
   when 'help'
     geheim.help
   else
