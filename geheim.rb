@@ -7,7 +7,7 @@ require "openssl"
 require 'digest/sha2'
 require 'base64'
 
-$data_dir = "./../.geheimdata"
+$data_dir = "../.geheimstore"
 $export_dir = "./export"
 
 module Git
