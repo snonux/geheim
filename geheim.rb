@@ -3,11 +3,56 @@
 require "digest"
 require "fileutils"
 require "pp"
+require "openssl"
+require 'digest/sha2'
+require 'base64'
+
+module Encryption
+  def initialize
+    super()
+    key_file = "../.geheim.key"
+    iv_file = "../.geheim.iv"
+    @@alg = "AES-256-CBC"
+    @key = Base64.encode64(File.read(key_file))
+    @iv = File.read(iv_file)
+  end
+
+  def encrypt(plain:)
+    aes = OpenSSL::Cipher::Cipher.new(@@alg)
+    aes.encrypt
+    aes.key = @key
+    aes.iv = @iv
+
+    encrypted = aes.update(plain)
+    encrypted << aes.final
+
+    encrypted
+  end
+
+  def decrypt(encrypted:)
+    aes = OpenSSL::Cipher::Cipher.new(@@alg)
+    aes.decrypt
+    aes.key = @key
+    aes.iv = @iv
+
+    plain = aes.update(encrypted)
+    plain << aes.final
+
+    plain
+  end
+
+  def test
+    plain_input = "foo bar baz"
+    encrypted = encrypt(plain: plain_input)
+    plain = decrypt(encrypted: encrypted)
+    pp plain == plain_input
+  end
+end
 
 class Config
   def initialize
-    @data_dir = "./data"
-    @key = "../.geheim.key"
+    # Nice example/reference: https://gist.github.com/byu/99651
+    @@data_dir = "./data"
   end
 end
 
@@ -16,7 +61,12 @@ class CommitFile < Config
     super()
   end
 
-  def commit_content(file:, content:)
+  def commit_content(file:, content:, update: false)
+    if File.exists?(file) and !update
+      puts "ERROR: #{file} already exists"
+      exit(3)
+    end
+
     dirname = File.dirname(file)
     unless File.directory?(dirname)
       puts "Creating #{dirname}"
@@ -31,14 +81,15 @@ class CommitFile < Config
 end
 
 class GeheimData < CommitFile
+  include Encryption
   attr_accessor :data
 
   def initialize(data_file:, data: nil)
     super()
 
-    @data_file = "#{@data_dir}/#{File.basename(data_file)}"
+    @data_path = "#{@@data_dir}/#{data_file}"
     if data.nil?
-      @data = File.read(@data_file)
+      @data = decrypt(encrypted: File.read(@data_path))
     else
       @data = data
     end
@@ -49,22 +100,22 @@ class GeheimData < CommitFile
   end
 
   def commit
-    commit_content(file: @data_file, content: @data)
+    commit_content(file: @data_path, content: encrypt(plain: @data))
   end
 end
 
 class Index < CommitFile
+  include Encryption
   attr_accessor :description, :data_file
 
   def initialize(index_file:, description: nil)
     super()
-
-    @index_file = Dir.glob("#{@data_dir}/**/#{index_file}").first
-    @data_file = @index_file.sub(".index", ".data")
-    @hash = File.basename(@index_file).sub(".index", "")
+    @data_file = index_file.sub(".index", ".data")
+    @index_path = "#{@@data_dir}/#{index_file}"
+    @hash = File.basename(index_file).sub(".index", "")
 
     if description.nil?
-      @description = File.open(@index_file, "r").readline.chomp
+      @description = decrypt(encrypted: File.read(@index_path))
     else
       @description = description
     end
@@ -79,7 +130,7 @@ class Index < CommitFile
   end
 
   def commit
-    commit_content(file: @index_file, content: @description)
+    commit_content(file: @index_path, content: encrypt(plain: @description))
   end
 end
 
@@ -87,9 +138,9 @@ class Geheim < Config
   def initialize
     super()
 
-    unless File.directory?(@data_dir)
-      puts "Creating #{@data_dir}"
-      FileUtils.mkdir_p(@data_dir)
+    unless File.directory?(@@data_dir)
+      puts "Creating #{@@data_dir}"
+      FileUtils.mkdir_p(@@data_dir)
     end
   end
 
@@ -118,8 +169,8 @@ class Geheim < Config
   end
 
   private def walk_indexes(search_term:)
-    Dir.glob("#{@data_dir}/**/*.index").each do |index_file|
-      index = Index.new(index_file: File.basename(index_file))
+    Dir.glob("#{@@data_dir}/**/*.index").each do |index_file|
+      index = Index.new(index_file: index_file.sub(@@data_dir, ""))
       if search_term.nil? or index.description.include?(search_term)
         yield index
       end
@@ -132,6 +183,16 @@ class Geheim < Config
         path << Digest::SHA256.hexdigest(part)
     end
     path.join("/")
+  end
+
+  def help
+    puts <<-END
+        geheim ls
+        geheim SEARCHTERM
+        geheim show SEARCHTERM
+        geheim add DESCRIPTION
+        geheim help
+    END
   end
 end
 
@@ -146,6 +207,8 @@ begin
     geheim.ls(search_term: ARGV[1], show: true)
   when 'add'
     geheim.add(description: ARGV[1])
+  when 'help'
+    geheim.help
   else
     geheim.ls(search_term: action)
   end
