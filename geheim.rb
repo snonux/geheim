@@ -69,7 +69,7 @@ module Encryption
   def initialize
     super()
     if @@key.nil?
-      @@key = Base64.encode64(File.read($key_file))
+      @@key = File.read($key_file)
       print "IV: "
       @@iv = @@key[-1] + $stdin.gets.chomp * 10 + @@key[0]
     end
