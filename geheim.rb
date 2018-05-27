@@ -7,8 +7,9 @@ require "openssl"
 require 'digest/sha2'
 require 'base64'
 
-$data_dir = "../.geheimstore"
-$export_dir = "./export"
+$data_dir = "#{ENV['HOME']}/.geheimstore"
+$export_dir = "#{ENV['HOME']}/.geheimexport"
+$key_file = "#{ENV['HOME']}/.geheim.key"
 
 module Git
   def initialize
@@ -20,7 +21,7 @@ module Git
     dirname, basename = File.dirname(file), File.basename(file)
     Dir.chdir(dirname)
     puts %x{git add "#{basename}"}
-    puts %x{git commit -m "Add #{file}"}
+    #puts %x{git commit -m "Add #{file}"} if commit
     Dir.chdir(@wd)
   end
 
@@ -28,7 +29,25 @@ module Git
     dirname, basename = File.dirname(file), File.basename(file)
     Dir.chdir(dirname)
     puts %x{git rm "#{basename}"}
-    puts %x{git commit -m "Remove #{file}"}
+    #puts %x{git commit -m "Remove #{file}"} if commit
+    Dir.chdir(@wd)
+  end
+
+  def git_status
+    Dir.chdir($data_dir)
+    puts %x{git status}
+    Dir.chdir(@wd)
+  end
+
+  def git_commit
+    Dir.chdir($data_dir)
+    puts %x{git commit -a -m 'Changing stuff, not telling what in commit history'}
+    Dir.chdir(@wd)
+  end
+
+  def git_reset
+    Dir.chdir($data_dir)
+    puts %x{git reset --hard}
     Dir.chdir(@wd)
   end
 
@@ -37,25 +56,30 @@ module Git
     Dir.chdir($data_dir)
     puts %x{git pull origin master}
     puts %x{git push origin master}
+    puts %x{git status}
     Dir.chdir(@wd)
   end
 end
 
 module Encryption
+  @@alg = "AES-256-CBC"
+  @@key = nil
+  @@iv = nil
+
   def initialize
     super()
-    key_file = "../.geheim.key"
-    iv_file = "../.geheim.iv"
-    @@alg = "AES-256-CBC"
-    @key = Base64.encode64(File.read(key_file))
-    @iv = File.read(iv_file)
+    if @@key.nil?
+      @@key = Base64.encode64(File.read($key_file))
+      print "IV: "
+      @@iv = @@key[-1] + $stdin.gets.chomp * 10 + @@key[0]
+    end
   end
 
   def encrypt(plain:)
     aes = OpenSSL::Cipher::Cipher.new(@@alg)
     aes.encrypt
-    aes.key = @key
-    aes.iv = @iv
+    aes.key = @@key
+    aes.iv = @@iv
 
     encrypted = aes.update(plain)
     encrypted << aes.final
@@ -66,8 +90,8 @@ module Encryption
   def decrypt(encrypted:)
     aes = OpenSSL::Cipher::Cipher.new(@@alg)
     aes.decrypt
-    aes.key = @key
-    aes.iv = @iv
+    aes.key = @@key
+    aes.iv = @@iv
 
     plain = aes.update(encrypted)
     plain << aes.final
@@ -126,7 +150,7 @@ class GeheimData < CommitFile
   end
 
   def to_s
-    "#{@data}\n"
+    "\t#{@data.gsub("\n", "\n\t")}\n"
   end
 
   def rm
@@ -184,7 +208,7 @@ class Index < CommitFile
 
   def to_s
     binary = is_binary? ? "(BINARY) " : ""
-    "=> #{@description} #{binary}<= ...#{@hash[-11...-1]}\n"
+    "#{@description} #{binary}...#{@hash[-11...-1]}\n"
   end
 
   def <=>(other)
@@ -226,6 +250,14 @@ class Geheim
     end
   end
 
+  def import_recursive(directory:)
+    Dir.glob("#{directory}/**/*").each do |source_file|
+      next if File.directory?(source_file)
+      file = source_file.sub("#{directory}/", "")
+      add(description: file, file: source_file)
+    end
+  end
+
   def add(description:, file: nil)
     hash = hash_path(description)
 
@@ -236,7 +268,6 @@ class Geheim
       puts "ERROR: #{file} does not exist!"
       exit(3)
     else
-      description += "/#{File.basename(file)}"
       puts "Importing #{file}"
       data = File.read(file)
     end
@@ -302,9 +333,10 @@ class CLI
       SEARCHTERM
       show SEARCHTERM
       add DESCRIPTION
-      import DESCRIPTION FILE
+      import FILE
+      import_r DIRECTORY
       rm SEARCHTERM
-      sync
+      sync|status|commit|reset
       help
       shell
     END
@@ -324,7 +356,9 @@ class CLI
       when 'add'
         geheim.add(description: argv[1])
       when 'import'
-        geheim.add(description: argv[1], file: argv[2])
+        geheim.add(file: argv[1])
+      when 'import_r'
+        geheim.import_recursive(directory: argv[1])
       when 'rm'
         geheim.rm(search_term: argv[1])
       when 'help'
@@ -335,6 +369,12 @@ class CLI
       when 'exit'
         @interactive = false
         puts "Good bye"
+      when 'status'
+        git_status
+      when 'commit'
+        git_commit
+      when 'reset'
+        git_reset
       when 'sync'
         git_sync
       else
