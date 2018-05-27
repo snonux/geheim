@@ -71,7 +71,9 @@ module Encryption
     if @@key.nil?
       @@key = File.read($key_file)
       print "IV: "
-      @@iv = @@key[-1] + $stdin.gets.chomp * 10 + @@key[0]
+      input = $stdin.gets.chomp
+      iv = input * 2 + "Hello world" + input * 2
+      @@iv = iv[0..15]
     end
   end
 
