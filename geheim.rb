@@ -7,6 +7,40 @@ require "openssl"
 require 'digest/sha2'
 require 'base64'
 
+$data_dir = "./../.geheimdata"
+$export_dir = "./export"
+
+module Git
+  def initialize
+    super()
+    @wd = Dir.pwd
+  end
+
+  def git_add(file:)
+    dirname, basename = File.dirname(file), File.basename(file)
+    Dir.chdir(dirname)
+    puts %x{git add "#{basename}"}
+    puts %x{git commit -m "Add #{file}"}
+    Dir.chdir(@wd)
+  end
+
+  def git_rm(file:)
+    dirname, basename = File.dirname(file), File.basename(file)
+    Dir.chdir(dirname)
+    puts %x{git rm "#{basename}"}
+    puts %x{git commit -m "Remove #{file}"}
+    Dir.chdir(@wd)
+  end
+
+  def git_sync
+    puts "Synchronising #{$data_dir}"
+    Dir.chdir($data_dir)
+    puts %x{git pull origin master}
+    puts %x{git push origin master}
+    Dir.chdir(@wd)
+  end
+end
+
 module Encryption
   def initialize
     super()
@@ -49,14 +83,8 @@ module Encryption
   end
 end
 
-class Config
-  def initialize
-    # Nice example/reference: https://gist.github.com/byu/99651
-    @@data_dir = "./data"
-  end
-end
-
-class CommitFile < Config
+class CommitFile
+  include Git
   def initialize
     super()
   end
@@ -77,17 +105,19 @@ class CommitFile < Config
     File.open(file, "w") do |fd|
       fd.write(content)
     end
+    git_add(file: file)
   end
 end
 
 class GeheimData < CommitFile
   include Encryption
+  include Git
   attr_accessor :data
 
   def initialize(data_file:, data: nil)
     super()
 
-    @data_path = "#{@@data_dir}/#{data_file}"
+    @data_path = "#{$data_dir}/#{data_file}"
     if data.nil?
       @data = decrypt(encrypted: File.read(@data_path))
     else
@@ -101,7 +131,21 @@ class GeheimData < CommitFile
 
   def rm
     puts "Deleting #{@data_path}"
-    File.unlink(@data_path)
+    git_rm(file: @data_path)
+  end
+
+  def export(destination_file:)
+    unless File.directory?($export_dir)
+      puts "Creating #{$export_dir}"
+      FileUtils.mkdir_p($export_dir)
+    end
+
+    destination_path = "#{$export_dir}/#{destination_file}"
+    puts "Exporting to #{destination_path}"
+
+    File.open(destination_path, "w") do |fd|
+      fd.write(@data)
+    end
   end
 
   def commit
@@ -116,7 +160,7 @@ class Index < CommitFile
   def initialize(index_file:, description: nil)
     super()
     @data_file = index_file.sub(".index", ".data")
-    @index_path = "#{@@data_dir}/#{index_file}"
+    @index_path = "#{$data_dir}/#{index_file}"
     @hash = File.basename(index_file).sub(".index", "")
 
     if description.nil?
@@ -149,7 +193,7 @@ class Index < CommitFile
 
   def rm
     puts "Deleting #{@index_path}"
-    File.unlink(@index_path)
+    git_rm(file: @index_path)
   end
 
   def commit
@@ -157,32 +201,45 @@ class Index < CommitFile
   end
 end
 
-class Geheim < Config
+class Geheim
   def initialize
     super()
 
-    unless File.directory?(@@data_dir)
-      puts "Creating #{@@data_dir}"
-      FileUtils.mkdir_p(@@data_dir)
+    unless File.directory?($data_dir)
+      puts "Creating #{$data_dir}"
+      FileUtils.mkdir_p($data_dir)
     end
   end
 
-  def ls(search_term: nil, show: false)
+  def ls(search_term: nil, show: false, export: false)
     indexes = Array.new
     walk_indexes(search_term: search_term) do |index|
       indexes << index
     end
     indexes.sort.each do |index|
       print index
-      print index.get_data if show and !index.is_binary?
+      if show and !index.is_binary?
+        print index.get_data
+      elsif export
+        index.get_data.export(destination_file: File.basename(index.description))
+      end
     end
   end
 
-  def add(description:)
+  def add(description:, file: nil)
     hash = hash_path(description)
 
-    print "Data: "
-    data = $stdin.gets.chomp
+    if file.nil?
+      print "Data: "
+      data = $stdin.gets.chomp
+    elsif !File.exists?(file)
+      puts "ERROR: #{file} does not exist!"
+      exit(3)
+    else
+      description += "/#{File.basename(file)}"
+      puts "Importing #{file}"
+      data = File.read(file)
+    end
 
     index = Index.new(index_file: "#{hash}.index", description: description)
     data = index.get_data(data: data)
@@ -214,8 +271,8 @@ class Geheim < Config
   end
 
   private def walk_indexes(search_term:)
-    Dir.glob("#{@@data_dir}/**/*.index").each do |index_file|
-      index = Index.new(index_file: index_file.sub(@@data_dir, ""))
+    Dir.glob("#{$data_dir}/**/*.index").each do |index_file|
+      index = Index.new(index_file: index_file.sub($data_dir, ""))
       if search_term.nil? or index.description.include?(search_term)
         yield index
       end
@@ -229,35 +286,69 @@ class Geheim < Config
     end
     path.join("/")
   end
+end
+
+class CLI
+  include Git
+
+  def initialize(interactive: false)
+    super()
+    @interactive = interactive
+  end
 
   def help
     puts <<-END
-        geheim ls
-        geheim SEARCHTERM
-        geheim show SEARCHTERM
-        geheim add DESCRIPTION
-        geheim rm SEARCHTERM
-        geheim help
+      ls
+      SEARCHTERM
+      show SEARCHTERM
+      add DESCRIPTION
+      import DESCRIPTION FILE
+      rm SEARCHTERM
+      sync
+      help
+      shell
     END
+  end
+
+  def shell_loop(argv)
+    loop do
+      geheim = Geheim.new
+      action = argv[0]
+      case action
+      when 'ls'
+        geheim.ls
+      when 'show'
+        geheim.ls(search_term: argv[1], show: true)
+      when 'export'
+        geheim.ls(search_term: argv[1], export: true)
+      when 'add'
+        geheim.add(description: argv[1])
+      when 'import'
+        geheim.add(description: argv[1], file: argv[2])
+      when 'rm'
+        geheim.rm(search_term: argv[1])
+      when 'help'
+        help
+      when 'shell'
+        @interactive = true
+        puts "Switching to interactive mode"
+      when 'exit'
+        @interactive = false
+        puts "Good bye"
+      when 'sync'
+        git_sync
+      else
+        geheim.ls(search_term: action)
+      end
+
+      break unless @interactive
+      print "% "
+      argv = $stdin.gets.chomp.split(" ")
+    end
   end
 end
 
 begin
-  action = ARGV[0]
-  geheim = Geheim.new
-
-  case action
-  when 'ls'
-    geheim.ls
-  when 'show'
-    geheim.ls(search_term: ARGV[1], show: true)
-  when 'add'
-    geheim.add(description: ARGV[1])
-  when 'rm'
-    geheim.rm(search_term: ARGV[1])
-  when 'help'
-    geheim.help
-  else
-    geheim.ls(search_term: action)
-  end
+  cli = CLI.new
+  cli.shell_loop(ARGV)
 end
