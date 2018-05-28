@@ -68,10 +68,10 @@ module Encryption
     super()
     if @@key.nil?
       @@key = File.read($key_file)
-      if ENV['IV']
-        input = ENV['IV']
+      if ENV['PIN']
+        input = ENV['PIN']
       else
-        print "IV: "
+        print "PIN: "
         input = $stdin.gets.chomp
       end
       iv = input * 2 + "Hello world" + input * 2
