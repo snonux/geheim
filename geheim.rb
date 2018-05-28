@@ -21,7 +21,6 @@ module Git
     dirname, basename = File.dirname(file), File.basename(file)
     Dir.chdir(dirname)
     puts %x{git add "#{basename}"}
-    #puts %x{git commit -m "Add #{file}"} if commit
     Dir.chdir(@wd)
   end
 
@@ -29,7 +28,6 @@ module Git
     dirname, basename = File.dirname(file), File.basename(file)
     Dir.chdir(dirname)
     puts %x{git rm "#{basename}"}
-    #puts %x{git commit -m "Remove #{file}"} if commit
     Dir.chdir(@wd)
   end
 
@@ -241,7 +239,9 @@ class Geheim
     end
   end
 
-  def ls(search_term: nil, show: false, export: false)
+  def ls(search_term: nil, show: false, export: false, open: false)
+    export = true if open
+
     indexes = Array.new
     walk_indexes(search_term: search_term) do |index|
       indexes << index
@@ -251,7 +251,9 @@ class Geheim
       if show and !index.is_binary?
         print index.get_data
       elsif export
-        index.get_data.export(destination_file: File.basename(index.description))
+        destination_file = File.basename(index.description)
+        index.get_data.export(destination_file: destination_file)
+        shred_file(file: open_exported(file: destination_file), delay: 3) if open
       end
     end
   end
@@ -307,6 +309,40 @@ class Geheim
     end
   end
 
+  def shred_all_exported
+    puts "Shredding all exported files"
+    Dir.glob("#{$export_dir}/*").each do |file|
+      shred_file(file: file)
+    end
+  end
+
+  private def shred_file(file:, delay: 0)
+    %x{which shred}
+    sleep(delay)
+    if $?.success?
+      run_command("shred -vu #{file}")
+    else
+      run_command("rm -Pfv #{file}")
+    end
+  end
+
+  private def open_exported(file:)
+    file_path = "#{$export_dir}/#{file}"
+    case ENV['UNAME']
+    when 'Darwin'
+      run_command("open #{file_path}")
+    when 'Microsoft'
+      run_command("winopen #{file_path}")
+    else
+      run_command("termux-open #{file_path}")
+    end
+    file_path
+  end
+
+  private def run_command(cmd)
+    puts "#{cmd}: #{%x{#{cmd}}}"
+  end
+
   private def walk_indexes(search_term:)
     Dir.glob("#{$data_dir}/**/*.index").each do |index_file|
       index = Index.new(index_file: index_file.sub($data_dir, ""))
@@ -339,10 +375,11 @@ class CLI
       SEARCHTERM
       show SEARCHTERM
       add DESCRIPTION
-      import FILE
+      import|export|open FILE
       import_r DIRECTORY
       rm SEARCHTERM
       sync|status|commit|reset
+      shred
       help
       shell
     END
@@ -359,6 +396,8 @@ class CLI
         geheim.ls(search_term: argv[1], show: true)
       when 'export'
         geheim.ls(search_term: argv[1], export: true)
+      when 'open'
+        geheim.ls(search_term: argv[1], open: true)
       when 'add'
         geheim.add(description: argv[1])
       when 'import'
@@ -383,6 +422,8 @@ class CLI
         git_reset
       when 'sync'
         git_sync
+      when 'shred'
+        geheim.shred_all_exported
       else
         geheim.ls(search_term: action)
       end
