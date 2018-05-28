@@ -70,8 +70,12 @@ module Encryption
     super()
     if @@key.nil?
       @@key = File.read($key_file)
-      print "IV: "
-      input = $stdin.gets.chomp
+      if ENV['IV']
+        input = ENV['IV']
+      else
+        print "IV: "
+        input = $stdin.gets.chomp
+      end
       iv = input * 2 + "Hello world" + input * 2
       @@iv = iv[0..15]
     end
