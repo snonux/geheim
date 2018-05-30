@@ -4,8 +4,9 @@ require "digest"
 require "fileutils"
 require "pp"
 require "openssl"
-require 'digest/sha2'
-require 'base64'
+require "digest/sha2"
+require "base64"
+require "io/console"
 
 $data_dir = "#{ENV['HOME']}/.geheimstore"
 $export_dir = "#{ENV['HOME']}/.geheimexport"
@@ -71,7 +72,7 @@ module Encryption
     if @@key.nil?
       @@key = File.read($key_file)
       print "IV: "
-      input = $stdin.gets.chomp
+      input = STDIN.noecho(&:gets).chomp
       iv = input * 2 + "Hello world" + input * 2
       @@iv = iv[0..15]
     end
