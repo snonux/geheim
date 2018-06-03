@@ -11,6 +11,7 @@ require "io/console"
 $data_dir = "#{ENV['HOME']}/.geheimstore"
 $export_dir = "#{ENV['HOME']}/.geheimexport"
 $key_file = "#{ENV['HOME']}/.geheim.key"
+$edit_cmd = "vim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
 
 module Git
   def initialize
@@ -141,11 +142,14 @@ end
 class GeheimData < CommitFile
   include Encryption
   include Git
+
   attr_accessor :data
+  attr_accessor :exported_path
 
   def initialize(data_file:, data: nil)
     super()
 
+    @exported_path = nil
     @data_path = "#{$data_dir}/#{data_file}"
     if data.nil?
       @data = decrypt(encrypted: File.read(@data_path))
@@ -171,6 +175,7 @@ class GeheimData < CommitFile
 
     destination_path = "#{$export_dir}/#{destination_file}"
     puts "Exporting to #{destination_path}"
+    @exported_path = destination_path
 
     File.open(destination_path, "w") do |fd|
       fd.write(@data)
@@ -240,21 +245,32 @@ class Geheim
     end
   end
 
-  def ls(search_term: nil, show: false, export: false, open: false)
-    export = true if open
-
+  def search(search_term: nil, action: :none)
     indexes = Array.new
     walk_indexes(search_term: search_term) do |index|
       indexes << index
     end
     indexes.sort.each do |index|
       print index
-      if show and !index.is_binary?
-        print index.get_data
-      elsif export
+      case action
+      when :cat
+        if !index.is_binary?
+          puts index.get_data
+        else
+          puts "Not catting binary data!"
+        end
+      when :export
         destination_file = File.basename(index.description)
         index.get_data.export(destination_file: destination_file)
-        shred_file(file: open_exported(file: destination_file), delay: 3) if open
+      when :open
+        destination_file = File.basename(index.description)
+        index.get_data.export(destination_file: destination_file)
+        shred_file(file: open_exported(file: destination_file), delay: 10)
+      when :edit
+        destination_file = File.basename(index.description)
+        data = index.get_data
+        data.export(destination_file: destination_file)
+        shred_file(file: edit_exported(file: destination_file))
       end
     end
   end
@@ -340,6 +356,14 @@ class Geheim
     file_path
   end
 
+  private def edit_exported(file:)
+    file_path = "#{$export_dir}/#{file}"
+    edit_cmd= "#{$edit_cmd} #{file_path}"
+    puts edit_cmd
+    system(edit_cmd)
+    file_path
+  end
+
   private def run_command(cmd)
     puts "#{cmd}: #{%x{#{cmd}}}"
   end
@@ -374,7 +398,8 @@ class CLI
     puts <<-END
       ls
       SEARCHTERM
-      show SEARCHTERM
+      search SEARCHTERM
+      cat SEARCHTERM
       add DESCRIPTION
       import|export|open FILE
       import_r DIRECTORY
@@ -393,12 +418,16 @@ class CLI
       case action
       when 'ls'
         geheim.ls
-      when 'show'
-        geheim.ls(search_term: argv[1], show: true)
+      when 'search'
+        geheim.search(search_term: argv[1])
+      when 'cat'
+        geheim.search(search_term: argv[1], action: :cat)
       when 'export'
-        geheim.ls(search_term: argv[1], export: true)
+        geheim.search(search_term: argv[1], action: :export)
+      when 'edit'
+        geheim.search(search_term: argv[1], action: :edit)
       when 'open'
-        geheim.ls(search_term: argv[1], open: true)
+        geheim.search(search_term: argv[1], action: :open)
       when 'add'
         geheim.add(description: argv[1])
       when 'import'
@@ -426,7 +455,7 @@ class CLI
       when 'shred'
         geheim.shred_all_exported
       else
-        geheim.ls(search_term: action)
+        geheim.search(search_term: action)
       end
 
       break unless @interactive
