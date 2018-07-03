@@ -119,8 +119,8 @@ class CommitFile
     super()
   end
 
-  def commit_content(file:, content:, update: false)
-    if File.exists?(file) and !update
+  def commit_content(file:, content:, force: false)
+    if File.exists?(file) and !force
       puts "ERROR: #{file} already exists"
       exit(3)
     end
@@ -182,8 +182,8 @@ class GeheimData < CommitFile
     end
   end
 
-  def commit
-    commit_content(file: @data_path, content: encrypt(plain: @data))
+  def commit(force: false)
+    commit_content(file: @data_path, content: encrypt(plain: @data), force: force)
   end
 end
 
@@ -230,8 +230,8 @@ class Index < CommitFile
     git_rm(file: @index_path)
   end
 
-  def commit
-    commit_content(file: @index_path, content: encrypt(plain: @description))
+  def commit(force: false)
+    commit_content(file: @index_path, content: encrypt(plain: @description), force: force)
   end
 end
 
@@ -275,33 +275,46 @@ class Geheim
     end
   end
 
-  def import_recursive(directory:)
+  def import_recursive(directory:, dest_dir: nil)
     Dir.glob("#{directory}/**/*").each do |source_file|
       next if File.directory?(source_file)
       file = source_file.sub("#{directory}/", "")
-      add(description: file, file: source_file)
+      add(description: file, file: source_file, dest_dir: dest_dir)
     end
   end
 
-  def add(description:, file: nil)
-    hash = hash_path(description)
+  def add(description: nil, file: nil, dest_dir: nil, force: false)
+    src_path = file.gsub("//", "/")
+
+    dest_path = if dest_dir.nil?
+      src_path
+    else
+      if dest_dir.include?(".")
+        dest_dir
+      else
+        "#{dest_dir}/#{File.basename(file)}".gsub("//", "/")
+      end
+    end
+
+    hash = hash_path(dest_path)
 
     if file.nil?
       print "Data: "
       data = $stdin.gets.chomp
-    elsif !File.exists?(file)
+    elsif !File.exists?(src_path)
       puts "ERROR: #{file} does not exist!"
       exit(3)
     else
-      puts "Importing #{file}"
-      data = File.read(file)
+      puts "Importing #{src_path} -> #{dest_path}"
+      data = File.read(src_path)
     end
+    description = dest_path if description.nil?
 
     index = Index.new(index_file: "#{hash}.index", description: description)
     data = index.get_data(data: data)
 
-    data.commit
-    index.commit
+    data.commit(force: force)
+    index.commit(force: force)
   end
 
   def rm(search_term:)
@@ -379,7 +392,7 @@ class Geheim
 
   private def hash_path(path_string)
     path = Array.new
-    path_string.split("/").each do |part|
+    path_string.gsub("//", "/").split("/").each do |part|
         path << Digest::SHA256.hexdigest(part)
     end
     path.join("/")
@@ -401,8 +414,9 @@ class CLI
       search SEARCHTERM
       cat SEARCHTERM
       add DESCRIPTION
-      import|export|open FILE
-      import_r DIRECTORY
+      export|open FILE
+      import FILE [DEST_DIRECTORY] [force]
+      import_r DIRECTORY [DEST_DIRECTORY]
       rm SEARCHTERM
       sync|status|commit|reset
       shred
@@ -431,9 +445,9 @@ class CLI
       when 'add'
         geheim.add(description: argv[1])
       when 'import'
-        geheim.add(file: argv[1])
+        geheim.add(file: argv[1], dest_dir: argv[2], force: !argv[3].nil?)
       when 'import_r'
-        geheim.import_recursive(directory: argv[1])
+        geheim.import_recursive(directory: argv[1], dest_dir: argv[2])
       when 'rm'
         geheim.rm(search_term: argv[1])
       when 'help'
