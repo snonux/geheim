@@ -275,9 +275,9 @@ class Geheim
         destination_file = File.basename(index.description)
         data = index.get_data
         data.export(destination_file: destination_file)
-        exported_file = edit_exported(file: destination_file)
+        external_file = external_edit(file: destination_file)
         data.reimport_after_export
-        shred_file(file: exported_file)
+        shred_file(file: external_file)
       end
     end
   end
@@ -286,11 +286,14 @@ class Geheim
     Dir.glob("#{directory}/**/*").each do |source_file|
       next if File.directory?(source_file)
       file = source_file.sub("#{directory}/", "")
-      add(description: file, file: source_file, dest_dir: dest_dir)
+      add(description: file, action: :import, file: source_file, dest_dir: dest_dir)
     end
   end
 
-  def add(description: nil, file: nil, dest_dir: nil, force: false)
+  def add(description: nil, action: :newtxt, file: nil, dest_dir: nil, force: false)
+    if action == :newtxt
+      file = external_edit(file: File.basename(description))
+    end
     src_path = file.gsub("//", "/")
 
     dest_path = if dest_dir.nil?
@@ -305,15 +308,14 @@ class Geheim
 
     hash = hash_path(dest_path)
 
-    if file.nil?
-      print "Data: "
-      data = $stdin.gets.chomp
-    elsif !File.exists?(src_path)
+    if !File.exists?(src_path)
+      # Assume import
       puts "ERROR: #{file} does not exist!"
       exit(3)
     else
       puts "Importing #{src_path} -> #{dest_path}"
       data = File.read(src_path)
+      shred_file(file: src_path) if action == :newtxt
     end
     description = dest_path if description.nil?
 
@@ -376,7 +378,7 @@ class Geheim
     file_path
   end
 
-  private def edit_exported(file:)
+  private def external_edit(file:)
     file_path = "#{$export_dir}/#{file}"
     edit_cmd= "#{$edit_cmd} #{file_path}"
     puts edit_cmd
@@ -452,7 +454,7 @@ class CLI
       when 'add'
         geheim.add(description: argv[1])
       when 'import'
-        geheim.add(file: argv[1], dest_dir: argv[2], force: !argv[3].nil?)
+        geheim.add(file: argv[1], action: :import, dest_dir: argv[2], force: !argv[3].nil?)
       when 'import_r'
         geheim.import_recursive(directory: argv[1], dest_dir: argv[2])
       when 'rm'
