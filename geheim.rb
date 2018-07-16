@@ -74,7 +74,7 @@ module Encryption
         input = ENV['PIN']
       else
         print "PIN: "
-        input = $stdin.gets.chomp
+        input = STDIN.noecho(&:gets).chomp
       end
       iv = input * 2 + "Hello world" + input * 2
       @@iv = iv[0..15]
@@ -182,6 +182,11 @@ class GeheimData < CommitFile
     end
   end
 
+  def reimport_after_export
+    @data = File.read(@exported_path)
+    commit(force: true)
+  end
+
   def commit(force: false)
     commit_content(file: @data_path, content: encrypt(plain: @data), force: force)
   end
@@ -270,7 +275,9 @@ class Geheim
         destination_file = File.basename(index.description)
         data = index.get_data
         data.export(destination_file: destination_file)
-        shred_file(file: edit_exported(file: destination_file))
+        exported_file = edit_exported(file: destination_file)
+        data.reimport_after_export
+        shred_file(file: exported_file)
       end
     end
   end
