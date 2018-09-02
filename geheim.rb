@@ -182,6 +182,11 @@ class GeheimData < CommitFile
     end
   end
 
+  def import(source_file:)
+    puts "Importing #{source_file} to #{@data_path}"
+    @data = File.read(source_file)
+  end
+
   def commit(force: false)
     commit_content(file: @data_path, content: encrypt(plain: @data), force: force)
   end
@@ -270,7 +275,10 @@ class Geheim
         destination_file = File.basename(index.description)
         data = index.get_data
         data.export(destination_file: destination_file)
-        shred_file(file: edit_exported(file: destination_file))
+        edited_file = edit_exported(file: destination_file)
+        data.import(source_file: edited_file)
+        data.commit(force: true)
+        shred_file(file: edited_file)
       end
     end
   end
