@@ -70,15 +70,17 @@ module Encryption
     super()
     if @@key.nil?
       @@key = File.read($key_file)
-      if ENV['PIN']
-        input = ENV['PIN']
-      else
-        print "PIN: "
-        input = STDIN.noecho(&:gets).chomp
-      end
-      iv = input * 2 + "Hello world" + input * 2
+      pin = read_pin
+      iv = pin * 2 + "Hello world" + pin * 2
       @@iv = iv[0..15]
     end
+  end
+
+  def read_pin
+    return ENV['PIN'] if ENV['PIN']
+    print "PIN: "
+    return STDIN.gets.chomp if %x{uname -o}.include?("Android")
+    STDIN.noecho(&:gets).chomp
   end
 
   def encrypt(plain:)
@@ -283,34 +285,33 @@ class Geheim
     end
   end
 
-  def import_recursive(directory:, dest_dir: nil)
-    Dir.glob("#{directory}/**/*").each do |source_file|
-      next if File.directory?(source_file)
-      file = source_file.sub("#{directory}/", "")
-      add(description: file, action: :import, file: source_file, dest_dir: dest_dir)
-    end
+  def add(description:)
+    hash = hash_path(description)
+
+    print "Data: "
+    data = $stdin.gets.chomp
+
+    index = Index.new(index_file: "#{hash}.index", description: description)
+    data = index.get_data(data: data)
+
+    data.commit
+    index.commit
   end
 
-  def add(description: nil, action: :newtxt, file: nil, dest_dir: nil, force: false)
-    if action == :newtxt
-      file = external_edit(file: File.basename(description))
-    end
+  def import(description: nil, file: nil, dest_dir: nil, force: false)
     src_path = file.gsub("//", "/")
 
     dest_path = if dest_dir.nil?
-      src_path
-    else
-      if dest_dir.include?(".")
-        dest_dir
-      else
-        "#{dest_dir}/#{File.basename(file)}".gsub("//", "/")
-      end
-    end
+                  src_path
+                elsif dest_dir.include?(".")
+                  dest_dir
+                else
+                  "#{dest_dir}/#{File.basename(file)}".gsub("//", "/")
+                end
 
     hash = hash_path(dest_path)
 
     if !File.exists?(src_path)
-      # Assume import
       puts "ERROR: #{file} does not exist!"
       exit(3)
     else
@@ -325,6 +326,14 @@ class Geheim
 
     data.commit(force: force)
     index.commit(force: force)
+  end
+
+  def import_recursive(directory:, dest_dir: nil)
+    Dir.glob("#{directory}/**/*").each do |source_file|
+      next if File.directory?(source_file)
+      file = source_file.sub("#{directory}/", "")
+      import(description: file, action: :import, file: source_file, dest_dir: dest_dir)
+    end
   end
 
   def rm(search_term:)
@@ -403,7 +412,7 @@ class Geheim
   private def hash_path(path_string)
     path = Array.new
     path_string.gsub("//", "/").split("/").each do |part|
-        path << Digest::SHA256.hexdigest(part)
+      path << Digest::SHA256.hexdigest(part)
     end
     path.join("/")
   end
@@ -437,6 +446,11 @@ class CLI
 
   def shell_loop(argv)
     loop do
+      if argv.length == 0 or @interactive
+        @interactive = true unless @interactive
+        print "% "
+        argv = $stdin.gets.chomp.split(" ")
+      end
       geheim = Geheim.new
       action = argv[0]
       case action
@@ -455,7 +469,7 @@ class CLI
       when 'add'
         geheim.add(description: argv[1])
       when 'import'
-        geheim.add(file: argv[1], action: :import, dest_dir: argv[2], force: !argv[3].nil?)
+        geheim.import(file: argv[1], dest_dir: argv[2], force: !argv[3].nil?)
       when 'import_r'
         geheim.import_recursive(directory: argv[1], dest_dir: argv[2])
       when 'rm'
@@ -481,10 +495,7 @@ class CLI
       else
         geheim.search(search_term: action)
       end
-
       break unless @interactive
-      print "% "
-      argv = $stdin.gets.chomp.split(" ")
     end
   end
 end
