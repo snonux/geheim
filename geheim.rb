@@ -291,25 +291,33 @@ class Geheim
     end
   end
 
-  def add(description: nil, file: nil, dest_dir: nil, force: false)
+  def add(description:)
+    hash = hash_path(description)
+
+    print "Data: "
+    data = $stdin.gets.chomp
+
+    index = Index.new(index_file: "#{hash}.index", description: description)
+    data = index.get_data(data: data)
+
+    data.commit
+    index.commit
+  end
+
+  def import(description: nil, file: nil, dest_dir: nil, force: false)
     src_path = file.gsub("//", "/")
 
     dest_path = if dest_dir.nil?
       src_path
-    else
-      if dest_dir.include?(".")
+    elsif dest_dir.include?(".")
         dest_dir
-      else
+    else
         "#{dest_dir}/#{File.basename(file)}".gsub("//", "/")
-      end
     end
 
     hash = hash_path(dest_path)
 
-    if file.nil?
-      print "Data: "
-      data = $stdin.gets.chomp
-    elsif !File.exists?(src_path)
+    if !File.exists?(src_path)
       puts "ERROR: #{file} does not exist!"
       exit(3)
     else
@@ -453,7 +461,7 @@ class CLI
       when 'add'
         geheim.add(description: argv[1])
       when 'import'
-        geheim.add(file: argv[1], dest_dir: argv[2], force: !argv[3].nil?)
+        geheim.import(file: argv[1], dest_dir: argv[2], force: !argv[3].nil?)
       when 'import_r'
         geheim.import_recursive(directory: argv[1], dest_dir: argv[2])
       when 'rm'
