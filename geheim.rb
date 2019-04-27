@@ -275,9 +275,10 @@ class Geheim
         destination_file = File.basename(index.description)
         data = index.get_data
         data.export(destination_file: destination_file)
-        external_file = external_edit(file: destination_file)
-        data.reimport_after_export
-        shred_file(file: external_file)
+        edited_file = edit_exported(file: destination_file)
+        data.import(source_file: edited_file)
+        data.commit(force: true)
+        shred_file(file: edited_file)
       end
     end
   end
