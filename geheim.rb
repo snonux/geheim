@@ -1,4 +1,4 @@
-#!/usr/bin/ruby
+!/usr/bin/ruby
 
 require "digest"
 require "fileutils"
@@ -423,7 +423,7 @@ class CLI
       search SEARCHTERM
       cat SEARCHTERM
       add DESCRIPTION
-      export|open FILE
+      export|open|edit FILE
       import FILE [DEST_DIRECTORY] [force]
       import_r DIRECTORY [DEST_DIRECTORY]
       rm SEARCHTERM
