@@ -259,7 +259,6 @@ class Geheim
     end
     indexes.sort.each do |index|
       print index
-      pp index
       case action
       when :cat
         if !index.is_binary?
