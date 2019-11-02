@@ -196,7 +196,7 @@ end
 
 class Index < CommitFile
   include Encryption
-  attr_accessor :description, :data_file
+  attr_accessor :description, :data_file, :index_path
 
   def initialize(index_file:, description: nil)
     super()
@@ -259,6 +259,7 @@ class Geheim
     end
     indexes.sort.each do |index|
       print index
+      pp index
       case action
       when :cat
         if !index.is_binary?
@@ -277,10 +278,8 @@ class Geheim
         destination_file = File.basename(index.description)
         data = index.get_data
         data.export(destination_file: destination_file)
-        edited_file = edit_exported(file: destination_file)
-        data.import(source_file: edited_file)
-        data.commit(force: true)
-        shred_file(file: edited_file)
+        external_edit(file: destination_file)
+        data.reimport_after_export
       end
     end
   end
@@ -298,9 +297,8 @@ class Geheim
     index.commit
   end
 
-  def import(description: nil, file: nil, dest_dir: nil, force: false)
+  def import(description: nil, action: nil, file: nil, dest_dir: nil, force: false)
     src_path = file.gsub("//", "/")
-
     dest_path = if dest_dir.nil?
                   src_path
                 elsif dest_dir.include?(".")
@@ -311,14 +309,14 @@ class Geheim
 
     hash = hash_path(dest_path)
 
-    if !File.exists?(src_path)
+    unless File.exists?(src_path)
       puts "ERROR: #{file} does not exist!"
       exit(3)
-    else
-      puts "Importing #{src_path} -> #{dest_path}"
-      data = File.read(src_path)
-      shred_file(file: src_path) if action == :newtxt
     end
+
+    puts "Importing #{src_path} -> #{dest_path}"
+    data = File.read(src_path)
+    shred_file(file: src_path) if action == :newtxt
     description = dest_path if description.nil?
 
     index = Index.new(index_file: "#{hash}.index", description: description)
