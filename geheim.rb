@@ -12,7 +12,7 @@ $data_dir = "#{ENV['HOME']}/git/geheimlager"
 $export_dir = "#{ENV['HOME']}/.geheimexport"
 $key_file = "#{ENV['HOME']}/.geheim.key"
 $edit_cmd = "vim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
-$sync_repos = %w(origin)
+$sync_repos = %w(dv vulcan)
 
 module Git
   def initialize
