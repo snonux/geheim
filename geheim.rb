@@ -8,11 +8,11 @@ require "digest/sha2"
 require "base64"
 require "io/console"
 
-$data_dir = "#{ENV['HOME']}/.geheimstore"
+$data_dir = "#{ENV['HOME']}/git/geheimlager"
 $export_dir = "#{ENV['HOME']}/.geheimexport"
 $key_file = "#{ENV['HOME']}/.geheim.key"
 $edit_cmd = "vim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
-$sync_repos = %w(dv vulcan)
+$sync_repos = %w(origin)
 
 module Git
   def initialize
