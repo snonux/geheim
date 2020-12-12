@@ -228,7 +228,7 @@ class Index < CommitFile
 
   def to_s
     binary = is_binary? ? "(BINARY) " : ""
-    "#{@description} #{binary}...#{@hash[-11...-1]}\n"
+    "#{@description}; #{binary}...#{@hash[-11...-1]}\n"
   end
 
   def <=>(other)
@@ -248,14 +248,27 @@ end
 class Geheim
   def initialize
     super()
-
     unless File.directory?($data_dir)
       puts "Creating #{$data_dir}"
       FileUtils.mkdir_p($data_dir)
     end
   end
 
+  def fzf(flag = :none)
+    # Need to read an index first before opening the pipe to initialize
+    # the encryption PIN.
+    fzf = nil
+    walk_indexes do |index|
+      fzf = IO.popen("fzf", "r+") if fzf.nil?
+      fzf.write(index)
+    end
+    match = fzf.read.chomp
+    puts match unless flag == :silent
+    match.split(";").first
+  end
+
   def search(search_term: nil, action: :none)
+    search_term = fzf(:silent) if search_term.nil?
     indexes = Array.new
     walk_indexes(search_term: search_term) do |index|
       indexes << index
@@ -267,7 +280,7 @@ class Geheim
         if !index.is_binary?
           puts index.get_data
         else
-          puts "Not catting binary data!"
+          puts "Not displaying binary data!"
         end
       when :export
         destination_file = File.basename(index.description)
@@ -283,6 +296,7 @@ class Geheim
         external_edit(file: destination_file)
         data.reimport_after_export
       end
+      index.description
     end
   end
 
@@ -382,6 +396,8 @@ class Geheim
       run_command("open #{file_path}")
     when 'Microsoft'
       run_command("winopen #{file_path}")
+    when 'Linux'
+      run_command("zathura #{file_path}")
     else
       run_command("termux-open #{file_path}")
     end
@@ -400,7 +416,7 @@ class Geheim
     puts "#{cmd}: #{%x{#{cmd}}}"
   end
 
-  private def walk_indexes(search_term:)
+  private def walk_indexes(search_term: nil)
     Dir.glob("#{$data_dir}/**/*.index").each do |index_file|
       index = Index.new(index_file: index_file.sub($data_dir, ""))
       if search_term.nil? or index.description.include?(search_term)
@@ -445,6 +461,8 @@ class CLI
   end
 
   def shell_loop(argv)
+    last_result = nil
+
     loop do
       if argv.length == 0 or @interactive
         @interactive = true unless @interactive
@@ -453,27 +471,29 @@ class CLI
       end
       geheim = Geheim.new
       action = argv[0]
+      search_term = argv[1].nil? ? last_result : argv[1]
+
       case action
       when 'ls'
         geheim.ls
       when 'search'
-        geheim.search(search_term: argv[1])
+        geheim.search(search_term: search_term)
       when 'cat'
-        geheim.search(search_term: argv[1], action: :cat)
+        geheim.search(search_term: search_term, action: :cat)
       when 'export'
-        geheim.search(search_term: argv[1], action: :export)
+        geheim.search(search_term: search_term, action: :export)
       when 'edit'
-        geheim.search(search_term: argv[1], action: :edit)
+        geheim.search(search_term: search_term, action: :edit)
       when 'open'
-        geheim.search(search_term: argv[1], action: :open)
+        geheim.search(search_term: search_term, action: :open)
       when 'add'
-        geheim.add(description: argv[1])
+        geheim.add(description: search_term)
       when 'import'
-        geheim.import(file: argv[1], dest_dir: argv[2], force: !argv[3].nil?)
+        geheim.import(file: search_term, dest_dir: argv[2], force: !argv[3].nil?)
       when 'import_r'
-        geheim.import_recursive(directory: argv[1], dest_dir: argv[2])
+        geheim.import_recursive(directory: search_term, dest_dir: argv[2])
       when 'rm'
-        geheim.rm(search_term: argv[1])
+        geheim.rm(search_term: search_term)
       when 'help'
         help
       when 'shell'
@@ -492,8 +512,13 @@ class CLI
         git_sync
       when 'shred'
         geheim.shred_all_exported
+      when 'last'
+        puts last_result
+        last_result
+      when nil
+        last_result = geheim.fzf
       else
-        geheim.search(search_term: action)
+        last_result = geheim.search(search_term: action)
       end
       break unless @interactive
     end
