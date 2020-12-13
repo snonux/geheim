@@ -14,6 +14,13 @@ $key_file = "#{ENV['HOME']}/.geheim.key"
 $edit_cmd = "vim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
 $sync_repos = %w(dv vulcan)
 
+# TODO before open sourcing:
+# 1. Add config file support
+# 2. Move all options to config file
+# 3. Add README.md with examples
+# 4. Refactor code a bit.
+# 5. Refactor the commands a bit (e.g. unify view with cat and open)
+
 module Git
   def initialize
     super()
@@ -262,6 +269,7 @@ class Geheim
       fzf = IO.popen("fzf", "r+") if fzf.nil?
       fzf.write(index)
     end
+    fzf.close_write
     match = fzf.read.chomp
     puts match unless flag == :silent
     match.split(";").first
@@ -288,7 +296,7 @@ class Geheim
       when :open
         destination_file = File.basename(index.description)
         index.get_data.export(destination_file: destination_file)
-        shred_file(file: open_exported(file: destination_file), delay: 10)
+        shred_file(file: open_exported(file: destination_file), delay: 0)
       when :edit
         destination_file = File.basename(index.description)
         data = index.get_data
@@ -305,7 +313,6 @@ class Geheim
 
     print "Data: "
     data = $stdin.gets.chomp
-
     index = Index.new(index_file: "#{hash}.index", description: description)
     data = index.get_data(data: data)
 
@@ -380,8 +387,8 @@ class Geheim
   end
 
   private def shred_file(file:, delay: 0)
+    sleep(delay) if delay > 0
     %x{which shred}
-    sleep(delay)
     if $?.success?
       run_command("shred -vu #{file}")
     else
@@ -391,6 +398,7 @@ class Geheim
 
   private def open_exported(file:)
     file_path = "#{$export_dir}/#{file}"
+
     case ENV['UNAME']
     when 'Darwin'
       run_command("open #{file_path}")
@@ -399,6 +407,7 @@ class Geheim
     when 'Linux'
       run_command("zathura #{file_path}")
     else
+      # Termux (Android)
       run_command("termux-open #{file_path}")
     end
     file_path
@@ -469,9 +478,10 @@ class CLI
         print "% "
         argv = $stdin.gets.chomp.split(" ")
       end
+
       geheim = Geheim.new
-      action = argv[0]
-      search_term = argv[1].nil? ? last_result : argv[1]
+      action = argv.first
+      search_term = argv.length < 2  ? last_result : argv[1]
 
       case action
       when 'ls'
