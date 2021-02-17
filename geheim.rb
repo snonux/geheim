@@ -20,6 +20,7 @@ $sync_repos = %w(dv vulcan)
 # 3. Add README.md with examples
 # 4. Refactor code a bit.
 # 5. Refactor the commands a bit (e.g. unify view with cat and open)
+# 6. Rebase git repo (remove older commints)
 
 module Git
   def initialize
@@ -223,6 +224,10 @@ class Index < CommitFile
 
   def is_binary?
     if @description.include?(".txt")
+      false
+    elsif @description.include?(".csv")
+      false
+    elsif @description.include?(".md")
       false
     else
       @description.include?(".")
