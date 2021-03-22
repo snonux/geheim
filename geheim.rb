@@ -90,7 +90,7 @@ module Encryption
   def read_pin
     return ENV['PIN'] if ENV['PIN']
     print "PIN: "
-    return STDIN.gets.chomp if %x{uname -o}.include?("Android")
+    return STDIN.gets.chomp if %x{uname}.include?("Android")
     STDIN.noecho(&:gets).chomp
   end
 
