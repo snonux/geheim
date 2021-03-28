@@ -225,6 +225,8 @@ class Index < CommitFile
   def is_binary?
     if @description.include?(".txt")
       false
+    if @description.include?(".README")
+      false
     elsif @description.include?(".csv")
       false
     elsif @description.include?(".md")
