@@ -412,7 +412,7 @@ class Geheim
     when 'Microsoft'
       run_command("winopen #{file_path}")
     when 'Linux'
-      run_command("zathura #{file_path}")
+      run_command("evince #{file_path}")
     else
       # Termux (Android)
       run_command("termux-open #{file_path}")
@@ -469,7 +469,7 @@ class CLI
       import FILE [DEST_DIRECTORY] [force]
       import_r DIRECTORY [DEST_DIRECTORY]
       rm SEARCHTERM
-      sync|status|commit|reset
+      sync|status|commit|reset|fullcommit
       shred
       help
       shell
@@ -526,6 +526,10 @@ class CLI
       when 'reset'
         git_reset
       when 'sync'
+        git_sync
+      when 'fullcommit'
+        git_sync
+        git_commit
         git_sync
       when 'shred'
         geheim.shred_all_exported
