@@ -11,6 +11,7 @@ require "io/console"
 $data_dir = "#{ENV['HOME']}/git/geheimlager"
 $export_dir = "#{ENV['HOME']}/.geheimlagerexport"
 $key_file = "#{ENV['HOME']}/.geheimlager.key"
+#$key_file_prev = "#{ENV['HOME']}/.geheimlager.key.0"
 $edit_cmd = "vim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
 $sync_repos = %w(davinci vulcan)
 
@@ -18,7 +19,7 @@ $sync_repos = %w(davinci vulcan)
 # 1. Add config file support
 # 2. Move all options to config file
 # 3. Add README.md with examples
-# 4. Refactor code a bit.
+# 4. Refactor code a bit. Apply my the Rubyist learnings.
 # 5. Refactor the commands a bit (e.g. unify view with cat and open)
 # 6. Rebase git repo (remove older commints)
 
@@ -169,6 +170,8 @@ class GeheimData < CommitFile
     else
       @data = data
     end
+  rescue => e
+    puts e
   end
 
   def to_s
@@ -181,18 +184,16 @@ class GeheimData < CommitFile
   end
 
   def export(destination_file:)
-    unless File.directory?($export_dir)
-      puts "Creating #{$export_dir}"
-      FileUtils.mkdir_p($export_dir)
+    destination_dir = get_dir_path("#{$export_dir}/#{File.dirname(destination_file)}")
+    unless File.directory?(destination_dir)
+      puts "Creating #{destination_dir}"
+      FileUtils.mkdir_p(destination_dir)
     end
 
-    destination_path = "#{$export_dir}/#{destination_file}"
+    destination_path = get_file_path("#{destination_dir}/#{File.basename(destination_file)}")
     puts "Exporting to #{destination_path}"
+    File.open(destination_path, "w") { |fd| fd.write(@data) }
     @exported_path = destination_path
-
-    File.open(destination_path, "w") do |fd|
-      fd.write(@data)
-    end
   end
 
   def reimport_after_export
@@ -202,6 +203,22 @@ class GeheimData < CommitFile
 
   def commit(force: false)
     commit_content(file: @data_path, content: encrypt(plain: @data), force: force)
+  end
+
+  private def get_dir_path(path)
+      new_path = path
+      while File.file?(new_path)
+          new_path = "#{path}.conflict.#{Time.now.to_i}"
+      end
+      new_path
+  end
+
+  private def get_file_path(path)
+      new_path = path
+      while File.exists?(new_path)
+          new_path = "#{path}.conflict.#{Time.now.to_i}"
+      end
+      new_path
   end
 end
 
@@ -297,6 +314,8 @@ class Geheim
         else
           puts "Not displaying binary data!"
         end
+      when :pathexport
+        index.get_data.export(destination_file: index.description)
       when :export
         destination_file = File.basename(index.description)
         index.get_data.export(destination_file: destination_file)
@@ -465,7 +484,7 @@ class CLI
       search SEARCHTERM
       cat SEARCHTERM
       add DESCRIPTION
-      export|open|edit FILE
+      export|pathexport|open|edit FILE
       import FILE [DEST_DIRECTORY] [force]
       import_r DIRECTORY [DEST_DIRECTORY]
       rm SEARCHTERM
@@ -499,6 +518,8 @@ class CLI
         geheim.search(search_term: search_term, action: :cat)
       when 'export'
         geheim.search(search_term: search_term, action: :export)
+      when 'pathexport'
+        geheim.search(search_term: search_term, action: :pathexport)
       when 'edit'
         geheim.search(search_term: search_term, action: :edit)
       when 'open'
