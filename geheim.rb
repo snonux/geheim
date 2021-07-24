@@ -11,7 +11,7 @@ require "io/console"
 $data_dir = "#{ENV['HOME']}/git/geheimlager"
 $export_dir = "#{ENV['HOME']}/.geheimlagerexport"
 $key_file = "#{ENV['HOME']}/.geheimlager.key"
-#$key_file_prev = "#{ENV['HOME']}/.geheimlager.key.0"
+$key_file_size = 32
 $edit_cmd = "vim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
 $sync_repos = %w(davinci vulcan)
 
@@ -81,11 +81,17 @@ module Encryption
   def initialize
     super()
     if @@key.nil?
-      @@key = File.read($key_file)
       pin = read_pin
       iv = pin * 2 + "Hello world" + pin * 2
       @@iv = iv[0..15]
+      @@key = enforce_key_size(File.read($key_file), $key_file_size)
     end
+  end
+
+  def enforce_key_size(key, force_size)
+    new_key = key
+    new_key += key while new_key.size < force_size
+    new_key[0..force_size-1]
   end
 
   def read_pin
@@ -283,6 +289,7 @@ class Geheim
       puts "Creating #{$data_dir}"
       FileUtils.mkdir_p($data_dir)
     end
+    @regex_cache = Hash.new
   end
 
   def fzf(flag = :none)
@@ -300,6 +307,7 @@ class Geheim
   end
 
   def search(search_term: nil, action: :none)
+    ec = 1
     search_term = fzf(:silent) if search_term.nil?
     indexes = Array.new
     walk_indexes(search_term: search_term) do |index|
@@ -307,12 +315,14 @@ class Geheim
     end
     indexes.sort.each do |index|
       print index
+      ec = 0
       case action
       when :cat
         if !index.is_binary?
           puts index.get_data
         else
           puts "Not displaying binary data!"
+          ec = 2
         end
       when :pathexport
         index.get_data.export(destination_file: index.description)
@@ -332,6 +342,7 @@ class Geheim
       end
       index.description
     end
+    ec
   end
 
   def add(description:)
@@ -347,7 +358,7 @@ class Geheim
   end
 
   def import(description: nil, action: nil, file: nil, dest_dir: nil, force: false)
-    src_path = file.gsub("//", "/")
+    src_path = file.gsub("//", "/").gsub(/^\.\//, '')
     dest_path = if dest_dir.nil?
                   src_path
                 elsif dest_dir.include?(".")
@@ -452,9 +463,11 @@ class Geheim
   end
 
   private def walk_indexes(search_term: nil)
+    @regex_cache[search_term] = Regexp.new(/#{search_term}/) unless @regex_cache.key?(search_term)
+    regex = @regex_cache[search_term]
     Dir.glob("#{$data_dir}/**/*.index").each do |index_file|
       index = Index.new(index_file: index_file.sub($data_dir, ""))
-      if search_term.nil? or index.description.include?(search_term)
+      if search_term.nil? or index.description.force_encoding('UTF-8').match(regex)
         yield index
       end
     end
@@ -497,6 +510,7 @@ class CLI
 
   def shell_loop(argv)
     last_result = nil
+    ec = 0
 
     loop do
       if argv.length == 0 or @interactive
@@ -509,9 +523,9 @@ class CLI
       action = argv.first
       search_term = argv.length < 2  ? last_result : argv[1]
 
-      case action
+      ec = case action
       when 'ls'
-        geheim.ls
+        geheim.search(search_term: '.')
       when 'search'
         geheim.search(search_term: search_term)
       when 'cat'
@@ -564,10 +578,12 @@ class CLI
       end
       break unless @interactive
     end
+
+    ec
   end
 end
 
 begin
   cli = CLI.new
-  cli.shell_loop(ARGV)
+  exit(cli.shell_loop(ARGV))
 end
