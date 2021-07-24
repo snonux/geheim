@@ -13,7 +13,7 @@ $export_dir = "#{ENV['HOME']}/.geheimlagerexport"
 $key_file = "#{ENV['HOME']}/.geheimlager.key"
 $key_file_size = 32
 $edit_cmd = "vim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
-$sync_repos = %w(davinci vulcan)
+$sync_repos = %w(deltavega vulcan)
 
 # TODO before open sourcing:
 # 1. Add config file support
