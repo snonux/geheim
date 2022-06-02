@@ -1,18 +1,21 @@
 #!/usr/bin/ruby
 
-require "digest"
-require "fileutils"
-require "pp"
-require "openssl"
-require "digest/sha2"
-require "base64"
-require "io/console"
+require 'digest'
+require 'fileutils'
+require 'pp'
+require 'openssl'
+require 'digest/sha2'
+require 'base64'
+require 'io/console'
 
 $data_dir = "#{ENV['HOME']}/git/geheimlager"
 $export_dir = "#{ENV['HOME']}/.geheimlagerexport"
 $key_file = "#{ENV['HOME']}/.geheimlager.key"
 $key_file_size = 32
 $edit_cmd = "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
+# TODO: Add macOS 
+$gnome_clipboard_cmd = 'gpaste-client'
+$macos_clipboard_cmd = 'pbcopy'
 $sync_repos = %w(git1 git2)
 
 # TODO before open sourcing:
@@ -23,7 +26,25 @@ $sync_repos = %w(git1 git2)
 # 5. Refactor the commands a bit (e.g. unify view with cat and open)
 # 6. Rebase git repo (remove older commints)
 
+module Log
+  def log(message); out(message, '>'); end
+  def prompt(message); out(message, '<', :nonl); end
+  def fatal(message); out(message, '!'); exit 3; end
+
+  private def out(message, prefix, flag = :none)
+    message.split("\n").each do |line|
+      if flag == :nonl
+        print "#{prefix} #{line}"
+      else
+        puts "#{prefix} #{line}"
+      end
+    end
+  end
+end
+
 module Git
+  include Log
+
   def initialize
     super()
     @wd = Dir.pwd
@@ -32,49 +53,51 @@ module Git
   def git_add(file:)
     dirname, basename = File.dirname(file), File.basename(file)
     Dir.chdir(dirname)
-    puts %x{git add "#{basename}"}
+    log %x{git add "#{basename}"}
     Dir.chdir(@wd)
   end
 
   def git_rm(file:)
     dirname, basename = File.dirname(file), File.basename(file)
     Dir.chdir(dirname)
-    puts %x{git rm "#{basename}"}
+    log %x{git rm "#{basename}"}
     Dir.chdir(@wd)
   end
 
   def git_status
     Dir.chdir($data_dir)
-    puts %x{git status}
+    log %x{git status}
     Dir.chdir(@wd)
   end
 
   def git_commit
     Dir.chdir($data_dir)
-    puts %x{git commit -a -m 'Changing stuff, not telling what in commit history'}
+    log %x{git commit -a -m 'Changing stuff, not telling what in commit history'}
     Dir.chdir(@wd)
   end
 
   def git_reset
     Dir.chdir($data_dir)
-    puts %x{git reset --hard}
+    log %x{git reset --hard}
     Dir.chdir(@wd)
   end
 
   def git_sync
-    puts "Synchronising #{$data_dir}"
+    log "Synchronising #{$data_dir}"
     Dir.chdir($data_dir)
     $sync_repos.each do |repo|
-      puts %x{git pull #{repo} master}
-      puts %x{git push #{repo} master}
+      log %x{git pull #{repo} master}
+      log %x{git push #{repo} master}
     end
-    puts %x{git status}
+    log %x{git status}
     Dir.chdir(@wd)
   end
 end
 
 module Encryption
-  @@alg = "AES-256-CBC"
+  include Log
+
+  @@alg = 'AES-256-CBC'
   @@key = nil
   @@iv = nil
 
@@ -96,7 +119,7 @@ module Encryption
 
   def read_pin
     return ENV['PIN'] if ENV['PIN']
-    print "PIN: "
+    prompt "PIN: "
     return STDIN.gets.chomp if %x{uname}.include?("Android")
     STDIN.noecho(&:gets).chomp
   end
@@ -121,8 +144,7 @@ module Encryption
 
     plain = aes.update(encrypted)
     plain << aes.final
-
-    plain
+    return plain
   end
 
   def test
@@ -135,33 +157,60 @@ end
 
 class CommitFile
   include Git
-  def initialize
-    super()
-  end
+  include Log
 
   def commit_content(file:, content:, force: false)
     if File.exists?(file) and !force
-      puts "ERROR: #{file} already exists"
-      exit(3)
+      fatal "#{file} already exists"
     end
 
     dirname = File.dirname(file)
     unless File.directory?(dirname)
-      puts "Creating #{dirname}"
+      log "Creating #{dirname}"
       FileUtils.mkdir_p(dirname)
     end
 
-    puts "Writing #{file}"
-    File.open(file, "w") do |fd|
-      fd.write(content)
-    end
+    log "Writing #{file}"
+    File.open(file, "w") {|fd| fd.write(content) }
     git_add(file: file)
+  end
+end
+
+module Clipboard
+  include Log
+  @clipboard_cmd = nil
+
+  def initialize
+    super()
+    case ENV['UNAME']
+    when 'Darwin'
+      @clipboard_cmd = $macos_clipboard_cmd
+    when 'Linux'
+      @clipboard_cmd = $gnome_clipboard_cmd
+    end
+  end
+
+  def paste(data)
+    fatal "Can't paste to clipboard" if @clipboard_cmd.nil?
+    user, password, other = extract(data.to_s)
+    read, write = IO.pipe
+    spawn(@clipboard_cmd, in: read)
+    write.write(password)
+    puts other
+    log "Pasted password for user #{user} to the clipboard"
+  end
+
+  private def extract(data)
+    parts = data.match(/(?<User>\S+):(?<Password>\S+)/)
+    cleared_data = data.gsub(/(\S+):\S+/, '\1:CENSORED');
+    return [parts['User'], parts['Password'], cleared_data]
   end
 end
 
 class GeheimData < CommitFile
   include Encryption
   include Git
+  include Log
 
   attr_accessor :data
   attr_accessor :exported_path
@@ -177,7 +226,7 @@ class GeheimData < CommitFile
       @data = data
     end
   rescue => e
-    puts e
+    fatal e
   end
 
   def to_s
@@ -185,19 +234,19 @@ class GeheimData < CommitFile
   end
 
   def rm
-    puts "Deleting #{@data_path}"
+    log "Deleting #{@data_path}"
     git_rm(file: @data_path)
   end
 
   def export(destination_file:)
-    destination_dir = get_dir_path("#{$export_dir}/#{File.dirname(destination_file)}")
+    destination_dir = "#{$export_dir}/#{File.dirname(destination_file)}"
     unless File.directory?(destination_dir)
-      puts "Creating #{destination_dir}"
+      log "Creating #{destination_dir}"
       FileUtils.mkdir_p(destination_dir)
     end
 
-    destination_path = get_file_path("#{destination_dir}/#{File.basename(destination_file)}")
-    puts "Exporting to #{destination_path}"
+    destination_path = "#{destination_dir}/#{File.basename(destination_file)}"
+    log "Exporting to #{destination_path}"
     File.open(destination_path, "w") { |fd| fd.write(@data) }
     @exported_path = destination_path
   end
@@ -210,27 +259,13 @@ class GeheimData < CommitFile
   def commit(force: false)
     commit_content(file: @data_path, content: encrypt(plain: @data), force: force)
   end
-
-  private def get_dir_path(path)
-      new_path = path
-      while File.file?(new_path)
-          new_path = "#{path}.conflict.#{Time.now.to_i}"
-      end
-      new_path
-  end
-
-  private def get_file_path(path)
-      new_path = path
-      while File.exists?(new_path)
-          new_path = "#{path}.conflict.#{Time.now.to_i}"
-      end
-      new_path
-  end
 end
 
 class Index < CommitFile
-  include Encryption
   attr_accessor :description, :data_file, :index_path
+
+  include Encryption
+  include Log
 
   def initialize(index_file:, description: nil)
     super()
@@ -246,16 +281,16 @@ class Index < CommitFile
   end
 
   def is_binary?
-    if @description.include?(".txt")
+    if @description.include?('.txt')
       false
-    elsif @description.include?(".README")
+    elsif @description.include?('.README')
       false
-    elsif @description.include?(".csv")
+    elsif @description.include?('.csv')
       false
-    elsif @description.include?(".md")
+    elsif @description.include?('.md')
       false
     else
-      @description.include?(".")
+      @description.include?('.')
     end
   end
 
@@ -264,7 +299,7 @@ class Index < CommitFile
   end
 
   def to_s
-    binary = is_binary? ? "(BINARY) " : ""
+    binary = is_binary? ? '(BINARY) ' : ''
     "#{@description}; #{binary}...#{@hash[-11...-1]}\n"
   end
 
@@ -273,7 +308,7 @@ class Index < CommitFile
   end
 
   def rm
-    puts "Deleting #{@index_path}"
+    log "Deleting #{@index_path}"
     git_rm(file: @index_path)
   end
 
@@ -283,10 +318,13 @@ class Index < CommitFile
 end
 
 class Geheim
+  include Clipboard
+  include Log
+
   def initialize
     super()
     unless File.directory?($data_dir)
-      puts "Creating #{$data_dir}"
+      log "Creating #{$data_dir}"
       FileUtils.mkdir_p($data_dir)
     end
     @regex_cache = Hash.new
@@ -297,13 +335,13 @@ class Geheim
     # the encryption PIN.
     fzf = nil
     walk_indexes do |index|
-      fzf = IO.popen("fzf", "r+") if fzf.nil?
+      fzf = IO.popen('fzf', 'r+') if fzf.nil?
       fzf.write(index)
     end
     fzf.close_write
     match = fzf.read.chomp
-    puts match unless flag == :silent
-    match.split(";").first
+    log match unless flag == :silent
+    match.split(';').first
   end
 
   def search(search_term: nil, action: :none)
@@ -317,12 +355,14 @@ class Geheim
       print index
       ec = 0
       case action
-      when :cat
-        if !index.is_binary?
-          puts index.get_data
-        else
-          puts "Not displaying binary data!"
+      when :cat, :paste
+        if index.is_binary?
+          log "Not displaying/pasting binary data!"
           ec = 2
+        elsif action == :paste
+          paste(index.get_data)
+        else
+          puts index.get_data
         end
       when :pathexport
         index.get_data.export(destination_file: index.description)
@@ -348,7 +388,7 @@ class Geheim
   def add(description:)
     hash = hash_path(description)
 
-    print "Data: "
+    log "Data: "
     data = $stdin.gets.chomp
     index = Index.new(index_file: "#{hash}.index", description: description)
     data = index.get_data(data: data)
@@ -369,12 +409,8 @@ class Geheim
 
     hash = hash_path(dest_path)
 
-    unless File.exists?(src_path)
-      puts "ERROR: #{file} does not exist!"
-      exit(3)
-    end
-
-    puts "Importing #{src_path} -> #{dest_path}"
+    fatal "#{file} does not exist!" unless File.exists?(src_path)
+    log "Importing #{src_path} -> #{dest_path}"
     data = File.read(src_path)
     shred_file(file: src_path) if action == :newtxt
     description = dest_path if description.nil?
@@ -401,8 +437,8 @@ class Geheim
     end
     indexes.sort.each do |index|
       loop do
-        print index
-        print "You really want to delete this? (y/n): "
+        log index
+        prompt "You really want to delete this? (y/n): "
         case $stdin.gets.chomp
         when 'y'
           data = index.get_data
@@ -417,7 +453,7 @@ class Geheim
   end
 
   def shred_all_exported
-    puts "Shredding all exported files"
+    log "Shredding all exported files"
     Dir.glob("#{$export_dir}/*").each do |file|
       shred_file(file: file)
     end
@@ -453,13 +489,13 @@ class Geheim
   private def external_edit(file:)
     file_path = "#{$export_dir}/#{file}"
     edit_cmd= "#{$edit_cmd} #{file_path}"
-    puts edit_cmd
+    log edit_cmd
     system(edit_cmd)
     file_path
   end
 
   private def run_command(cmd)
-    puts "#{cmd}: #{%x{#{cmd}}}"
+    log "#{cmd}: #{%x{#{cmd}}}"
   end
 
   private def walk_indexes(search_term: nil)
@@ -484,6 +520,7 @@ end
 
 class CLI
   include Git
+  include Log
 
   def initialize(interactive: false)
     super()
@@ -491,11 +528,12 @@ class CLI
   end
 
   def help
-    puts <<-END
+    log <<-END
       ls
       SEARCHTERM
       search SEARCHTERM
       cat SEARCHTERM
+      get SEARCHTERM
       add DESCRIPTION
       export|pathexport|open|edit FILE
       import FILE [DEST_DIRECTORY] [force]
@@ -530,6 +568,8 @@ class CLI
         geheim.search(search_term: search_term)
       when 'cat'
         geheim.search(search_term: search_term, action: :cat)
+      when 'paste'
+        geheim.search(search_term: search_term, action: :paste)
       when 'export'
         geheim.search(search_term: search_term, action: :export)
       when 'pathexport'
@@ -550,10 +590,10 @@ class CLI
         help
       when 'shell'
         @interactive = true
-        puts "Switching to interactive mode"
+        log "Switching to interactive mode"
       when 'exit'
         @interactive = false
-        puts "Good bye"
+        log "Good bye"
       when 'status'
         git_status
       when 'commit'
