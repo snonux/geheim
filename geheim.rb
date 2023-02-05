@@ -105,6 +105,7 @@ module Encryption
     super()
     if @@key.nil?
       pin = read_pin
+      # TODO: Make iv configurable
       iv = pin * 2 + "Hello world" + pin * 2
       @@iv = iv[0..15]
       @@key = enforce_key_size(File.read($key_file), $key_file_size)
@@ -284,6 +285,8 @@ class Index < CommitFile
     if @description.include?('.txt')
       false
     elsif @description.include?('.README')
+      false
+    elsif @description.include?('.conf')
       false
     elsif @description.include?('.csv')
       false
