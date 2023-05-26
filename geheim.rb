@@ -39,7 +39,9 @@ module Log
         puts "#{prefix} #{line}"
       end
     end
-  end
+  rescue => e
+    log(e)
+  end 
 end
 
 module Git
@@ -161,7 +163,7 @@ class CommitFile
   include Log
 
   def commit_content(file:, content:, force: false)
-    if File.exists?(file) and !force
+    if File.exist?(file) and !force
       fatal "#{file} already exists"
     end
 
@@ -412,7 +414,7 @@ class Geheim
 
     hash = hash_path(dest_path)
 
-    fatal "#{file} does not exist!" unless File.exists?(src_path)
+    fatal "#{file} does not exist!" unless File.exist?(src_path)
     log "Importing #{src_path} -> #{dest_path}"
     data = File.read(src_path)
     shred_file(file: src_path) if action == :newtxt
