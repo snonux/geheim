@@ -4,7 +4,7 @@ require 'base64'
 require 'digest'
 require 'digest/sha2'
 require 'fileutils'
-require 'io/console'
+# require 'io/console'
 require 'openssl'
 require 'json'
 
@@ -50,7 +50,7 @@ module Log
   end
 
   def warn(message)
-    log "WARN: #{message}"
+    out message, 'WARN'
   end
 
   def prompt(message)
@@ -58,7 +58,7 @@ module Log
   end
 
   def fatal(message)
-    out "FATAL: #{message}", '!'
+    out message, 'FATAL'
     exit 3
   end
 
@@ -73,9 +73,6 @@ module Log
         puts "#{prefix} #{line}"
       end
     end
-  rescue StandardError => e
-    puts e.backtrace
-    puts e
   end
 end
 
@@ -259,11 +256,7 @@ class GeheimData < CommitFile
 
     @exported_path = nil
     @data_path = "#{Config.data_dir}/#{data_file}"
-    @data = if data.nil?
-              decrypt(encrypted: File.read(@data_path))
-            else
-              data
-            end
+    @data = data.nil? ? decrypt(encrypted: File.read(@data_path)) : data
   rescue StandardError => e
     fatal e
   end
@@ -312,7 +305,6 @@ class Index < CommitFile
     @data_file = index_file.sub('.index', '.data')
     @index_path = "#{Config.data_dir}/#{index_file}"
     @hash = File.basename(index_file).sub('.index', '')
-
     @description = description.nil? ? decrypt(encrypted: File.read(@index_path)) : description
   end
 
@@ -664,7 +656,4 @@ class CLI
   end
 end
 
-begin
-  cli = CLI.new
-  exit(cli.shell_loop(ARGV))
-end
+exit(CLI.new.shell_loop(ARGV))

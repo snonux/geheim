@@ -15,3 +15,5 @@ This is for my own use. So the documentation here may be lacking. But feel free 
 * Works on MacOS, Linux and on Android via Termux.
 * Clipboard support for MacOS and GNOME (Linux).
 * Interactive `geheim` shell support.
+* Can import and export documuments in batches.
+* Can shred exported data again.
