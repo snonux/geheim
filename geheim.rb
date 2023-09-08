@@ -6,36 +6,59 @@ require 'digest/sha2'
 require 'fileutils'
 require 'io/console'
 require 'openssl'
+require 'json'
 
-DATA_DIR = "#{ENV['HOME']}/git/geheimlager".freeze
-EXPOR_DIR = "#{ENV['HOME']}/.geheimlagerexport".freeze
-KEY_FILE = "#{ENV['HOME']}/.geheimlager.key".freeze
-KEY_FILE_SIZE = 32
-EDIT_CMD = "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'".freeze
-GNOME_CLIPBOARD_CMD = 'gpaste-client'.freeze
-MACOS_CLIPBOARD_CMD = 'pbcopy'.freeze
-SYNC_REPOS = %w[git1 git2].freeze
+# Configuration
+class Config
+  config_file = "#{ENV['HOME']}/.config/geheim.json"
 
-# TODO: before open sourcing:
-# 1. Add config file support
-# 2. Move all options to config file
-# 3. Add README.md with examples
-# 4. Refactor code a bit. Apply my the Rubyist learnings.
-# 5. Refactor the commands a bit (e.g. unify view with cat and open)
-# 6. Rebase git repo (remove older commints)
+  default_config = {
+    data_dir: "#{ENV['HOME']}/git/geheimlager".freeze,
+    export_dir: "#{ENV['HOME']}/.geheimlagerexport".freeze,
+    key_file: "#{ENV['HOME']}/.geheimlager.key".freeze,
+    key_length: 32,
+    enc_alg: 'AES-256-CBC'.freeze,
+    add_to_iv: 'Hello world'.freeze,
+    edit_cmd: "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'".freeze,
+    gnome_clipboard_cmd: 'gpaste-client'.freeze,
+    macos_clipboard_cmd: 'pbcopy'.freeze,
+    sync_repos: %w[git1 git2].freeze
+  }
+
+  @@config = begin
+    default_config.merge(JSON.parse(File.read(config_file))).freeze
+  rescue StandardError => e
+    puts "Unable to read #{config_file}, using defaults! #{e}"
+    default_config.freeze
+  end
+
+  def self.method_missing(method_name)
+    raise "Unknown config key '#{method_name}'" unless respond_to_missing?(method_name)
+
+    @@config[method_name]
+  end
+
+  def self.respond_to_missing?(method_name)
+    @@config.key?(method_name)
+  end
+end
 
 # Logging capabilities
 module Log
   def log(message)
-    out(message, '>')
+    out message, '>'
+  end
+
+  def warn(message)
+    log "WARN: #{message}"
   end
 
   def prompt(message)
-    out(message, '<', :nonl)
+    out message, '<', :nonl
   end
 
   def fatal(message)
-    out(message, '!')
+    out "FATAL: #{message}", '!'
     exit 3
   end
 
@@ -82,27 +105,27 @@ module Git
   end
 
   def git_status
-    Dir.chdir(DATA_DIR)
+    Dir.chdir(Config.data_dir)
     log `git status`
     Dir.chdir(@wd)
   end
 
   def git_commit
-    Dir.chdir(DATA_DIR)
+    Dir.chdir(Config.data_dir)
     log `git commit -a -m 'Changing stuff, not telling what in commit history'`
     Dir.chdir(@wd)
   end
 
   def git_reset
-    Dir.chdir(DATA_DIR)
+    Dir.chdir(Config.data_dir)
     log `git reset --hard`
     Dir.chdir(@wd)
   end
 
   def git_sync
-    log "Synchronising #{DATA_DIR}"
-    Dir.chdir(DATA_DIR)
-    SYNC_REPOS.each do |repo|
+    log "Synchronising #{Config.data_dir}"
+    Dir.chdir(Config.data_dir)
+    Config.sync_repos.each do |repo|
       log `git pull #{repo} master`
       log `git push #{repo} master`
     end
@@ -115,22 +138,19 @@ end
 module Encryption
   include Log
 
-  @@alg = 'AES-256-CBC'
-  @@key = nil
-  @@iv = nil
-
   def initialize
     super()
-    return unless @@key.nil?
+    return unless @key.nil?
 
     pin = read_pin
-    # TODO: Make iv configurable, and remove from Git history or change
-    iv = "#{pin * 2}Hello world#{pin * 2}"
-    @@iv = iv[0..15]
-    @@key = enforce_key_size(File.read(KEY_FILE), KEY_FILE_SIZE)
+    # Set up initialization vector
+    iv = "#{pin * 2}#{Config.add_to_iv}#{pin * 2}"
+    @iv = iv[0..15]
+    # ... and the encryption key!
+    @key = enforce_key_length(File.read(Config.key_file), Config.key_length)
   end
 
-  def enforce_key_size(key, force_size)
+  def enforce_key_length(key, force_size)
     new_key = key
     new_key += key while new_key.size < force_size
     new_key[0..force_size - 1]
@@ -146,10 +166,10 @@ module Encryption
   end
 
   def encrypt(plain:)
-    aes = OpenSSL::Cipher::Cipher.new(@@alg)
+    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
     aes.encrypt
-    aes.key = @@key
-    aes.iv = @@iv
+    aes.key = @key
+    aes.iv = @iv
 
     encrypted = aes.update(plain)
     encrypted << aes.final
@@ -158,10 +178,10 @@ module Encryption
   end
 
   def decrypt(encrypted:)
-    aes = OpenSSL::Cipher::Cipher.new(@@alg)
+    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
     aes.decrypt
-    aes.key = @@key
-    aes.iv = @@iv
+    aes.key = @key
+    aes.iv = @iv
 
     plain = aes.update(encrypted)
     plain << aes.final
@@ -203,12 +223,8 @@ module Clipboard
 
   def initialize
     super()
-    case ENV['UNAME']
-    when 'Darwin'
-      @clipboard_cmd = MACOS_CLIPBOARD_CMD
-    when 'Linux'
-      @clipboard_cmd = GNOME_CLIPBOARD_CMD
-    end
+    @clipboard_cmd =
+      ENV['UNAME'] == 'Darwin' ? Config.macos_clipboard_cmd : Config.gnome_clipboard_cmd
   end
 
   def paste(data)
@@ -218,7 +234,7 @@ module Clipboard
     spawn(@clipboard_cmd, in: read)
     write.write(password)
     puts other
-    log "Pasted password for user #{user} to the clipboard"
+    log "Pasted password for user '#{user}' to the clipboard"
   end
 
   private
@@ -242,7 +258,7 @@ class GeheimData < CommitFile
     super()
 
     @exported_path = nil
-    @data_path = "#{DATA_DIR}/#{data_file}"
+    @data_path = "#{Config.data_dir}/#{data_file}"
     @data = if data.nil?
               decrypt(encrypted: File.read(@data_path))
             else
@@ -262,7 +278,7 @@ class GeheimData < CommitFile
   end
 
   def export(destination_file:)
-    destination_dir = "#{EXPOR_DIR}/#{File.dirname(destination_file)}"
+    destination_dir = "#{Config.export_dir}/#{File.dirname(destination_file)}"
     unless File.directory?(destination_dir)
       log "Creating #{destination_dir}"
       FileUtils.mkdir_p(destination_dir)
@@ -294,7 +310,7 @@ class Index < CommitFile
   def initialize(index_file:, description: nil)
     super()
     @data_file = index_file.sub('.index', '.data')
-    @index_path = "#{DATA_DIR}/#{index_file}"
+    @index_path = "#{Config.data_dir}/#{index_file}"
     @hash = File.basename(index_file).sub('.index', '')
 
     @description = description.nil? ? decrypt(encrypted: File.read(@index_path)) : description
@@ -346,9 +362,9 @@ class Geheim
 
   def initialize
     super()
-    unless File.directory?(DATA_DIR)
-      log "Creating #{DATA_DIR}"
-      FileUtils.mkdir_p(DATA_DIR)
+    unless File.directory?(Config.data_dir)
+      log "Creating #{Config.data_dir}"
+      FileUtils.mkdir_p(Config.data_dir)
     end
     @regex_cache = {}
   end
@@ -478,7 +494,7 @@ class Geheim
 
   def shred_all_exported
     log 'Shredding all exported files'
-    Dir.glob("#{EXPOR_DIR}/*").each do |file|
+    Dir.glob("#{Config.export_dir}/*").each do |file|
       shred_file(file: file)
     end
   end
@@ -496,7 +512,7 @@ class Geheim
   end
 
   def open_exported(file:)
-    file_path = "#{EXPOR_DIR}/#{file}"
+    file_path = "#{Config.export_dir}/#{file}"
 
     case ENV['UNAME']
     when 'Darwin'
@@ -513,8 +529,8 @@ class Geheim
   end
 
   def external_edit(file:)
-    file_path = "#{EXPOR_DIR}/#{file}"
-    edit_cmd = "#{EDIT_CMD} #{file_path}"
+    file_path = "#{Config.export_dir}/#{file}"
+    edit_cmd = "#{Config.edit_cmd} #{file_path}"
     log edit_cmd
     system(edit_cmd)
     file_path
@@ -527,8 +543,8 @@ class Geheim
   def walk_indexes(search_term: nil)
     @regex_cache[search_term] = Regexp.new(/#{search_term}/) unless @regex_cache.key?(search_term)
     regex = @regex_cache[search_term]
-    Dir.glob("#{DATA_DIR}/**/*.index").each do |index_file|
-      index = Index.new(index_file: index_file.sub(DATA_DIR, ''))
+    Dir.glob("#{Config.data_dir}/**/*.index").each do |index_file|
+      index = Index.new(index_file: index_file.sub(Config.data_dir, ''))
       yield index if search_term.nil? || index.description.force_encoding('UTF-8').match(regex)
     end
   end
