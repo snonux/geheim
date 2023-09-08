@@ -2,7 +2,6 @@
 
 require 'digest'
 require 'fileutils'
-require 'pp'
 require 'openssl'
 require 'digest/sha2'
 require 'base64'
@@ -13,12 +12,12 @@ $export_dir = "#{ENV['HOME']}/.geheimlagerexport"
 $key_file = "#{ENV['HOME']}/.geheimlager.key"
 $key_file_size = 32
 $edit_cmd = "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'"
-# TODO: Add macOS 
+# TODO: Add macOS
 $gnome_clipboard_cmd = 'gpaste-client'
 $macos_clipboard_cmd = 'pbcopy'
-$sync_repos = %w(git1 git2)
+$sync_repos = %w[git1 git2]
 
-# TODO before open sourcing:
+# TODO: before open sourcing:
 # 1. Add config file support
 # 2. Move all options to config file
 # 3. Add README.md with examples
@@ -27,11 +26,21 @@ $sync_repos = %w(git1 git2)
 # 6. Rebase git repo (remove older commints)
 
 module Log
-  def log(message); out(message, '>'); end
-  def prompt(message); out(message, '<', :nonl); end
-  def fatal(message); out(message, '!'); exit 3; end
+  def log(message)
+    out(message, '>')
+  end
+
+  def prompt(message)
+    out(message, '<', :nonl)
+  end
+
+  def fatal(message)
+    out(message, '!')
+    exit 3
+  end
 
   private def out(message, prefix, flag = :none)
+    message = message.to_s unless message.instance_of?(String)
     message.split("\n").each do |line|
       if flag == :nonl
         print "#{prefix} #{line}"
@@ -39,9 +48,10 @@ module Log
         puts "#{prefix} #{line}"
       end
     end
-  rescue => e
-    log(e)
-  end 
+  rescue StandardError => e
+    puts e.backtrace
+    puts e
+  end
 end
 
 module Git
@@ -53,34 +63,36 @@ module Git
   end
 
   def git_add(file:)
-    dirname, basename = File.dirname(file), File.basename(file)
+    dirname = File.dirname(file)
+    basename = File.basename(file)
     Dir.chdir(dirname)
-    log %x{git add "#{basename}"}
+    log `git add "#{basename}"`
     Dir.chdir(@wd)
   end
 
   def git_rm(file:)
-    dirname, basename = File.dirname(file), File.basename(file)
+    dirname = File.dirname(file)
+    basename = File.basename(file)
     Dir.chdir(dirname)
-    log %x{git rm "#{basename}"}
+    log `git rm "#{basename}"`
     Dir.chdir(@wd)
   end
 
   def git_status
     Dir.chdir($data_dir)
-    log %x{git status}
+    log `git status`
     Dir.chdir(@wd)
   end
 
   def git_commit
     Dir.chdir($data_dir)
-    log %x{git commit -a -m 'Changing stuff, not telling what in commit history'}
+    log `git commit -a -m 'Changing stuff, not telling what in commit history'`
     Dir.chdir(@wd)
   end
 
   def git_reset
     Dir.chdir($data_dir)
-    log %x{git reset --hard}
+    log `git reset --hard`
     Dir.chdir(@wd)
   end
 
@@ -88,10 +100,10 @@ module Git
     log "Synchronising #{$data_dir}"
     Dir.chdir($data_dir)
     $sync_repos.each do |repo|
-      log %x{git pull #{repo} master}
-      log %x{git push #{repo} master}
+      log `git pull #{repo} master`
+      log `git push #{repo} master`
     end
-    log %x{git status}
+    log `git status`
     Dir.chdir(@wd)
   end
 end
@@ -105,25 +117,27 @@ module Encryption
 
   def initialize
     super()
-    if @@key.nil?
-      pin = read_pin
-      # TODO: Make iv configurable
-      iv = pin * 2 + "Hello world" + pin * 2
-      @@iv = iv[0..15]
-      @@key = enforce_key_size(File.read($key_file), $key_file_size)
-    end
+    return unless @@key.nil?
+
+    pin = read_pin
+    # TODO: Make iv configurable
+    iv = pin * 2 + 'Hello world' + pin * 2
+    @@iv = iv[0..15]
+    @@key = enforce_key_size(File.read($key_file), $key_file_size)
   end
 
   def enforce_key_size(key, force_size)
     new_key = key
     new_key += key while new_key.size < force_size
-    new_key[0..force_size-1]
+    new_key[0..force_size - 1]
   end
 
   def read_pin
     return ENV['PIN'] if ENV['PIN']
-    prompt "PIN: "
-    return STDIN.gets.chomp if %x{uname}.include?("Android")
+
+    prompt 'PIN: '
+    return STDIN.gets.chomp if `uname`.include?('Android')
+
     STDIN.noecho(&:gets).chomp
   end
 
@@ -147,11 +161,11 @@ module Encryption
 
     plain = aes.update(encrypted)
     plain << aes.final
-    return plain
+    plain
   end
 
   def test
-    plain_input = "foo bar baz"
+    plain_input = 'foo bar baz'
     encrypted = encrypt(plain: plain_input)
     plain = decrypt(encrypted: encrypted)
     pp plain == plain_input
@@ -163,9 +177,7 @@ class CommitFile
   include Log
 
   def commit_content(file:, content:, force: false)
-    if File.exist?(file) and !force
-      fatal "#{file} already exists"
-    end
+    fatal "#{file} already exists" if File.exist?(file) and !force
 
     dirname = File.dirname(file)
     unless File.directory?(dirname)
@@ -174,7 +186,7 @@ class CommitFile
     end
 
     log "Writing #{file}"
-    File.open(file, "w") {|fd| fd.write(content) }
+    File.open(file, 'w') { |fd| fd.write(content) }
     git_add(file: file)
   end
 end
@@ -205,8 +217,8 @@ module Clipboard
 
   private def extract(data)
     parts = data.match(/(?<User>\S+):(?<Password>\S+)/)
-    cleared_data = data.gsub(/(\S+):\S+/, '\1:CENSORED');
-    return [parts['User'], parts['Password'], cleared_data]
+    cleared_data = data.gsub(/(\S+):\S+/, '\1:CENSORED')
+    [parts['User'], parts['Password'], cleared_data]
   end
 end
 
@@ -215,20 +227,19 @@ class GeheimData < CommitFile
   include Git
   include Log
 
-  attr_accessor :data
-  attr_accessor :exported_path
+  attr_accessor :data, :exported_path
 
   def initialize(data_file:, data: nil)
     super()
 
     @exported_path = nil
     @data_path = "#{$data_dir}/#{data_file}"
-    if data.nil?
-      @data = decrypt(encrypted: File.read(@data_path))
-    else
-      @data = data
-    end
-  rescue => e
+    @data = if data.nil?
+              decrypt(encrypted: File.read(@data_path))
+            else
+              data
+            end
+  rescue StandardError => e
     fatal e
   end
 
@@ -250,7 +261,7 @@ class GeheimData < CommitFile
 
     destination_path = "#{destination_dir}/#{File.basename(destination_file)}"
     log "Exporting to #{destination_path}"
-    File.open(destination_path, "w") { |fd| fd.write(@data) }
+    File.open(destination_path, 'w') { |fd| fd.write(@data) }
     @exported_path = destination_path
   end
 
@@ -272,15 +283,15 @@ class Index < CommitFile
 
   def initialize(index_file:, description: nil)
     super()
-    @data_file = index_file.sub(".index", ".data")
+    @data_file = index_file.sub('.index', '.data')
     @index_path = "#{$data_dir}/#{index_file}"
-    @hash = File.basename(index_file).sub(".index", "")
+    @hash = File.basename(index_file).sub('.index', '')
 
-    if description.nil?
-      @description = decrypt(encrypted: File.read(@index_path))
-    else
-      @description = description
-    end
+    @description = if description.nil?
+                     decrypt(encrypted: File.read(@index_path))
+                   else
+                     description
+                   end
   end
 
   def is_binary?
@@ -332,7 +343,7 @@ class Geheim
       log "Creating #{$data_dir}"
       FileUtils.mkdir_p($data_dir)
     end
-    @regex_cache = Hash.new
+    @regex_cache = {}
   end
 
   def fzf(flag = :none)
@@ -352,7 +363,7 @@ class Geheim
   def search(search_term: nil, action: :none)
     ec = 1
     search_term = fzf(:silent) if search_term.nil?
-    indexes = Array.new
+    indexes = []
     walk_indexes(search_term: search_term) do |index|
       indexes << index
     end
@@ -362,7 +373,7 @@ class Geheim
       case action
       when :cat, :paste
         if index.is_binary?
-          log "Not displaying/pasting binary data!"
+          log 'Not displaying/pasting binary data!'
           ec = 2
         elsif action == :paste
           paste(index.get_data)
@@ -393,7 +404,7 @@ class Geheim
   def add(description:)
     hash = hash_path(description)
 
-    log "Data: "
+    log 'Data: '
     data = $stdin.gets.chomp
     index = Index.new(index_file: "#{hash}.index", description: description)
     data = index.get_data(data: data)
@@ -403,13 +414,13 @@ class Geheim
   end
 
   def import(description: nil, action: nil, file: nil, dest_dir: nil, force: false)
-    src_path = file.gsub("//", "/").gsub(/^\.\//, '')
+    src_path = file.gsub('//', '/').gsub(%r{^\./}, '')
     dest_path = if dest_dir.nil?
                   src_path
-                elsif dest_dir.include?(".")
+                elsif dest_dir.include?('.')
                   dest_dir
                 else
-                  "#{dest_dir}/#{File.basename(file)}".gsub("//", "/")
+                  "#{dest_dir}/#{File.basename(file)}".gsub('//', '/')
                 end
 
     hash = hash_path(dest_path)
@@ -430,20 +441,21 @@ class Geheim
   def import_recursive(directory:, dest_dir: nil)
     Dir.glob("#{directory}/**/*").each do |source_file|
       next if File.directory?(source_file)
-      file = source_file.sub("#{directory}/", "")
+
+      file = source_file.sub("#{directory}/", '')
       import(description: file, action: :import, file: source_file, dest_dir: dest_dir)
     end
   end
 
   def rm(search_term:)
-    indexes = Array.new
+    indexes = []
     walk_indexes(search_term: search_term) do |index|
       indexes << index
     end
     indexes.sort.each do |index|
       loop do
         log index
-        prompt "You really want to delete this? (y/n): "
+        prompt 'You really want to delete this? (y/n): '
         case $stdin.gets.chomp
         when 'y'
           data = index.get_data
@@ -458,7 +470,7 @@ class Geheim
   end
 
   def shred_all_exported
-    log "Shredding all exported files"
+    log 'Shredding all exported files'
     Dir.glob("#{$export_dir}/*").each do |file|
       shred_file(file: file)
     end
@@ -466,7 +478,7 @@ class Geheim
 
   private def shred_file(file:, delay: 0)
     sleep(delay) if delay > 0
-    %x{which shred}
+    `which shred`
     if $?.success?
       run_command("shred -vu #{file}")
     else
@@ -493,33 +505,31 @@ class Geheim
 
   private def external_edit(file:)
     file_path = "#{$export_dir}/#{file}"
-    edit_cmd= "#{$edit_cmd} #{file_path}"
+    edit_cmd = "#{$edit_cmd} #{file_path}"
     log edit_cmd
     system(edit_cmd)
     file_path
   end
 
   private def run_command(cmd)
-    log "#{cmd}: #{%x{#{cmd}}}"
+    log "#{cmd}: #{`#{cmd}`}"
   end
 
   private def walk_indexes(search_term: nil)
     @regex_cache[search_term] = Regexp.new(/#{search_term}/) unless @regex_cache.key?(search_term)
     regex = @regex_cache[search_term]
     Dir.glob("#{$data_dir}/**/*.index").each do |index_file|
-      index = Index.new(index_file: index_file.sub($data_dir, ""))
-      if search_term.nil? or index.description.force_encoding('UTF-8').match(regex)
-        yield index
-      end
+      index = Index.new(index_file: index_file.sub($data_dir, ''))
+      yield index if search_term.nil? or index.description.force_encoding('UTF-8').match(regex)
     end
   end
 
   private def hash_path(path_string)
-    path = Array.new
-    path_string.gsub("//", "/").split("/").each do |part|
+    path = []
+    path_string.gsub('//', '/').split('/').each do |part|
       path << Digest::SHA256.hexdigest(part)
     end
-    path.join("/")
+    path.join('/')
   end
 end
 
@@ -557,70 +567,70 @@ class CLI
 
     loop do
       if argv.length == 0 or @interactive
-        @interactive = true unless @interactive
-        print "% "
-        argv = $stdin.gets.chomp.split(" ")
+        @interactive ||= true
+        print '% '
+        argv = $stdin.gets.chomp.split(' ')
       end
 
       geheim = Geheim.new
       action = argv.first
-      search_term = argv.length < 2  ? last_result : argv[1]
+      search_term = argv.length < 2 ? last_result : argv[1]
 
       ec = case action
-      when 'ls'
-        geheim.search(search_term: '.')
-      when 'search'
-        geheim.search(search_term: search_term)
-      when 'cat'
-        geheim.search(search_term: search_term, action: :cat)
-      when 'paste'
-        geheim.search(search_term: search_term, action: :paste)
-      when 'export'
-        geheim.search(search_term: search_term, action: :export)
-      when 'pathexport'
-        geheim.search(search_term: search_term, action: :pathexport)
-      when 'edit'
-        geheim.search(search_term: search_term, action: :edit)
-      when 'open'
-        geheim.search(search_term: search_term, action: :open)
-      when 'add'
-        geheim.add(description: search_term)
-      when 'import'
-        geheim.import(file: search_term, dest_dir: argv[2], force: !argv[3].nil?)
-      when 'import_r'
-        geheim.import_recursive(directory: search_term, dest_dir: argv[2])
-      when 'rm'
-        geheim.rm(search_term: search_term)
-      when 'help'
-        help
-      when 'shell'
-        @interactive = true
-        log "Switching to interactive mode"
-      when 'exit'
-        @interactive = false
-        log "Good bye"
-      when 'status'
-        git_status
-      when 'commit'
-        git_commit
-      when 'reset'
-        git_reset
-      when 'sync'
-        git_sync
-      when 'fullcommit'
-        git_sync
-        git_commit
-        git_sync
-      when 'shred'
-        geheim.shred_all_exported
-      when 'last'
-        puts last_result
-        last_result
-      when nil
-        last_result = geheim.fzf
-      else
-        last_result = geheim.search(search_term: action)
-      end
+           when 'ls'
+             geheim.search(search_term: '.')
+           when 'search'
+             geheim.search(search_term: search_term)
+           when 'cat'
+             geheim.search(search_term: search_term, action: :cat)
+           when 'paste'
+             geheim.search(search_term: search_term, action: :paste)
+           when 'export'
+             geheim.search(search_term: search_term, action: :export)
+           when 'pathexport'
+             geheim.search(search_term: search_term, action: :pathexport)
+           when 'edit'
+             geheim.search(search_term: search_term, action: :edit)
+           when 'open'
+             geheim.search(search_term: search_term, action: :open)
+           when 'add'
+             geheim.add(description: search_term)
+           when 'import'
+             geheim.import(file: search_term, dest_dir: argv[2], force: !argv[3].nil?)
+           when 'import_r'
+             geheim.import_recursive(directory: search_term, dest_dir: argv[2])
+           when 'rm'
+             geheim.rm(search_term: search_term)
+           when 'help'
+             help
+           when 'shell'
+             @interactive = true
+             log 'Switching to interactive mode'
+           when 'exit'
+             @interactive = false
+             log 'Good bye'
+           when 'status'
+             git_status
+           when 'commit'
+             git_commit
+           when 'reset'
+             git_reset
+           when 'sync'
+             git_sync
+           when 'fullcommit'
+             git_sync
+             git_commit
+             git_sync
+           when 'shred'
+             geheim.shred_all_exported
+           when 'last'
+             puts last_result
+             last_result
+           when nil
+             last_result = geheim.fzf
+           else
+             last_result = geheim.search(search_term: action)
+           end
       break unless @interactive
     end
 
