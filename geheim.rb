@@ -4,7 +4,7 @@ require 'base64'
 require 'digest'
 require 'digest/sha2'
 require 'fileutils'
-# require 'io/console'
+require 'io/console'
 require 'openssl'
 require 'json'
 
