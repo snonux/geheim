@@ -486,15 +486,21 @@ class Geheim
 
   def shred_all_exported
     log 'Shredding all exported files'
+    ec = 0
     Dir.glob("#{Config.export_dir}/*").each do |file|
-      shred_file(file: file)
+      next unless File.file?(file)
+
+      if (ec_ = shred_file(file: file)).positive?
+        ec = ec_
+      end
     end
+    ec
   end
 
   private
 
   def shred_file(file:, delay: 0)
-    sleep(delay) if delay > 0
+    sleep(delay) if delay.positive?
     `which shred`
     if $?.success?
       run_command("shred -vu #{file}")
@@ -530,6 +536,7 @@ class Geheim
 
   def run_command(cmd)
     log "#{cmd}: #{`#{cmd}`}"
+    $?.exitstatus
   end
 
   def walk_indexes(search_term: nil)
