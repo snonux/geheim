@@ -134,18 +134,51 @@ end
 # Encryption functionality
 module Encryption
   include Log
+  @@key = nil
 
   def initialize
     super()
-    return unless @key.nil?
+    return unless @@key.nil?
 
     pin = read_pin
     # Set up initialization vector
     iv = "#{pin * 2}#{Config.add_to_iv}#{pin * 2}"
-    @iv = iv[0..15]
+    @@iv = iv[0..15]
     # ... and the encryption key!
-    @key = enforce_key_length(File.read(Config.key_file), Config.key_length)
+    @@key = enforce_key_length(File.read(Config.key_file), Config.key_length)
   end
+
+  def encrypt(plain:)
+    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
+    aes.encrypt
+    aes.key = @@key
+    aes.iv = @@iv
+
+    encrypted = aes.update(plain)
+    encrypted << aes.final
+
+    encrypted
+  end
+
+  def decrypt(encrypted:)
+    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
+    aes.decrypt
+    aes.key = @@key
+    aes.iv = @@iv
+
+    plain = aes.update(encrypted)
+    plain << aes.final
+    plain
+  end
+
+  def test
+    plain_input = 'foo bar baz'
+    encrypted = encrypt(plain: plain_input)
+    plain = decrypt(encrypted: encrypted)
+    pp plain == plain_input
+  end
+
+  private
 
   def enforce_key_length(key, force_size)
     new_key = key
@@ -160,36 +193,6 @@ module Encryption
     return $stdin.gets.chomp if `uname`.include?('Android')
 
     $stdin.noecho(&:gets).chomp
-  end
-
-  def encrypt(plain:)
-    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
-    aes.encrypt
-    aes.key = @key
-    aes.iv = @iv
-
-    encrypted = aes.update(plain)
-    encrypted << aes.final
-
-    encrypted
-  end
-
-  def decrypt(encrypted:)
-    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
-    aes.decrypt
-    aes.key = @key
-    aes.iv = @iv
-
-    plain = aes.update(encrypted)
-    plain << aes.final
-    plain
-  end
-
-  def test
-    plain_input = 'foo bar baz'
-    encrypted = encrypt(plain: plain_input)
-    plain = decrypt(encrypted: encrypted)
-    pp plain == plain_input
   end
 end
 
