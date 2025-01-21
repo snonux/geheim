@@ -19,7 +19,8 @@ class Config
     key_length: 32,
     enc_alg: 'AES-256-CBC'.freeze,
     add_to_iv: 'Hello world'.freeze,
-    edit_cmd: "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'".freeze,
+    edit_cmd: 'hx'.freeze,
+    # edit_cmd: "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'".freeze,
     gnome_clipboard_cmd: 'gpaste-client'.freeze,
     macos_clipboard_cmd: 'pbcopy'.freeze,
     sync_repos: %w[git1 git2].freeze
@@ -485,6 +486,7 @@ class Geheim
         end
       end
     end
+    0
   end
 
   def shred_all_exported
