@@ -8,8 +8,9 @@ require 'fileutils'
 require 'io/console'
 require 'openssl'
 require 'json'
+require 'readline'
 
-VERSION = 'v0.2.0'
+VERSION = 'v0.3.0'
 
 # Configuration
 class Config
@@ -570,6 +571,35 @@ class CLI
   def initialize(interactive: false)
     super()
     @interactive = interactive
+    setup_readline if interactive
+  end
+
+  def setup_readline
+    # Enable vi editing mode
+    Readline.vi_editing_mode
+    
+    # Set up tab completion
+    Readline.completion_proc = proc do |input|
+      # Get all available commands
+      completions = COMMANDS.dup
+      
+      # If PIN is set, also include entry names for completion
+      if ENV['PIN']
+        begin
+          geheim = Geheim.new
+          geheim.walk_indexes do |index|
+            completions << index.description.split(';').first.strip
+          end
+        rescue StandardError
+          # Ignore errors during completion
+        end
+      end
+      
+      completions.grep(/^#{Regexp.escape(input)}/)
+    end
+    
+    # Set up completion append character
+    Readline.completion_append_character = ' '
   end
 
   def commands
@@ -606,8 +636,18 @@ class CLI
     loop do
       if argv.empty? || @interactive
         @interactive ||= true
-        print '% '
-        argv = $stdin.gets.chomp.split
+        setup_readline unless Readline.completion_proc
+        
+        input = Readline.readline('% ', true)
+        break if input.nil? # Handle Ctrl+D
+        
+        # Don't add empty lines or duplicates to history
+        Readline::HISTORY.pop if input.strip.empty? || 
+                                  (Readline::HISTORY.length > 1 && 
+                                   Readline::HISTORY[-1] == Readline::HISTORY[-2])
+        
+        argv = input.strip.split
+        next if argv.empty?
       end
 
       geheim = Geheim.new
