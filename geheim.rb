@@ -8,6 +8,8 @@ require 'io/console'
 require 'openssl'
 require 'json'
 
+VERSION = 'v0.1.0'
+
 # Configuration
 class Config
   config_file = "#{ENV['HOME']}/.config/geheim.json"
@@ -589,6 +591,7 @@ class CLI
       rm SEARCHTERM
       sync|status|commit|reset|fullcommit
       shred
+      version
       help
       shell
     HELP
@@ -657,6 +660,9 @@ class CLI
              git_sync
            when 'shred'
              geheim.shred_all_exported
+           when 'version'
+             log "geheim #{VERSION}"
+             0
            when 'last'
              puts last_result
              last_result
