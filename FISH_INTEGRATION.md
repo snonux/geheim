@@ -1,0 +1,80 @@
+# Fish Shell Integration for Geheim
+
+## Installation
+
+### Automatic Installation
+
+```bash
+cd /home/paul/git/geheim
+./install-fish.sh
+```
+
+### Manual Installation
+
+1. Copy the completion file for `geheim`:
+```bash
+cp completions/geheim.fish ~/.config/fish/completions/
+```
+
+2. Copy the wrapper function for `ge`:
+```bash
+cp completions/ge.fish ~/.config/fish/functions/
+```
+
+3. Reload fish shell:
+```bash
+exec fish
+```
+
+## Usage
+
+### `geheim` command
+
+The `geheim` command now has full tab completion:
+- Tab complete all subcommands (ls, search, cat, paste, etc.)
+- Tab complete file paths for `import`
+- Tab complete the `force` flag for import
+
+### `ge` wrapper
+
+The `ge` wrapper provides shortcuts:
+
+```bash
+# Interactive mode (no arguments)
+ge
+
+# Search shortcut (if not a known command, treats as search)
+ge mypassword
+# Same as: geheim search mypassword
+
+# Explicit commands still work
+ge cat mypassword
+ge import file.txt backup/
+ge import file.txt backup/ force
+```
+
+### Dynamic Entry Completion
+
+For better security, entry completion only works when the `PIN` environment variable is set:
+
+```bash
+# Set PIN for session (entries will autocomplete)
+set -x PIN yourpin
+
+# Use geheim with autocomplete
+ge <TAB>
+
+# Unset PIN when done
+set -e PIN
+```
+
+Without `PIN` set, commands will still autocomplete, but entry names won't (to avoid prompting for PIN during tab completion).
+
+## Features
+
+- ✓ Dynamic command completion (fetched from `geheim commands`)
+- ✓ Smart search fallback in `ge` wrapper
+- ✓ Entry name completion (when PIN is set)
+- ✓ File path completion for import/export
+- ✓ Force flag completion
+- ✓ No hardcoded command lists (stays in sync with geheim updates)

@@ -8,7 +8,7 @@ require 'io/console'
 require 'openssl'
 require 'json'
 
-VERSION = 'v0.1.0'
+VERSION = 'v0.2.0'
 
 # Configuration
 class Config
@@ -577,6 +577,35 @@ class CLI
     @interactive = interactive
   end
 
+  def commands
+    puts 'ls'
+    puts 'search'
+    puts 'cat'
+    puts 'paste'
+    puts 'get'
+    puts 'add'
+    puts 'export'
+    puts 'pathexport'
+    puts 'open'
+    puts 'edit'
+    puts 'import'
+    puts 'import_r'
+    puts 'rm'
+    puts 'sync'
+    puts 'status'
+    puts 'commit'
+    puts 'reset'
+    puts 'fullcommit'
+    puts 'shred'
+    puts 'version'
+    puts 'commands'
+    puts 'help'
+    puts 'shell'
+    puts 'exit'
+    puts 'last'
+    0
+  end
+
   def help
     log <<-HELP
       ls
@@ -592,6 +621,7 @@ class CLI
       sync|status|commit|reset|fullcommit
       shred
       version
+      commands
       help
       shell
     HELP
@@ -663,6 +693,8 @@ class CLI
            when 'version'
              log "geheim #{VERSION}"
              0
+           when 'commands'
+             commands
            when 'last'
              puts last_result
              last_result
