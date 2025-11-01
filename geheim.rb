@@ -10,7 +10,7 @@ require 'openssl'
 require 'json'
 require 'readline'
 
-VERSION = 'v0.3.0'
+VERSION = 'v0.3.1'
 
 # Configuration
 class Config
@@ -641,13 +641,12 @@ class CLI
         input = Readline.readline('% ', true)
         break if input.nil? # Handle Ctrl+D
         
+        argv = input.strip.split
+        
         # Don't add empty lines or duplicates to history
-        Readline::HISTORY.pop if input.strip.empty? || 
+        Readline::HISTORY.pop if argv.empty? || 
                                   (Readline::HISTORY.length > 1 && 
                                    Readline::HISTORY[-1] == Readline::HISTORY[-2])
-        
-        argv = input.strip.split
-        next if argv.empty?
       end
 
       geheim = Geheim.new
