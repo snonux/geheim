@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 
 require 'base64'
 require 'digest'
@@ -12,37 +13,37 @@ VERSION = 'v0.2.0'
 
 # Configuration
 class Config
-  config_file = "#{ENV['HOME']}/.config/geheim.json"
+  CONFIG_PATH = File.join(Dir.home, '.config', 'geheim.json')
 
-  default_config = {
-    data_dir: "#{ENV['HOME']}/git/geheimlager".freeze,
-    export_dir: "#{ENV['HOME']}/.geheimlagerexport".freeze,
-    key_file: "#{ENV['HOME']}/.geheimlager.key".freeze,
+  DEFAULTS = {
+    data_dir: File.join(Dir.home, 'git', 'geheimlager'),
+    export_dir: File.join(Dir.home, '.geheimlagerexport'),
+    key_file: File.join(Dir.home, '.geheimlager.key'),
     key_length: 32,
-    enc_alg: 'AES-256-CBC'.freeze,
-    add_to_iv: 'Hello world'.freeze,
-    edit_cmd: 'hx'.freeze,
-    # edit_cmd: "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'".freeze,
-    gnome_clipboard_cmd: 'gpaste-client'.freeze,
-    macos_clipboard_cmd: 'pbcopy'.freeze,
-    sync_repos: %w[git1 git2].freeze
-  }
+    enc_alg: 'AES-256-CBC',
+    add_to_iv: 'Hello world',
+    edit_cmd: 'hx',
+    # edit_cmd: "nvim --cmd 'set noswapfile' --cmd 'set nobackup' --cmd 'set nowritebackup'",
+    gnome_clipboard_cmd: 'gpaste-client',
+    macos_clipboard_cmd: 'pbcopy',
+    sync_repos: %w[git1 git2]
+  }.freeze
 
   @@config = begin
-    default_config.merge(JSON.parse(File.read(config_file))).freeze
+    DEFAULTS.merge(JSON.parse(File.read(CONFIG_PATH), symbolize_names: true)).freeze
   rescue StandardError => e
-    puts "Unable to read #{config_file}, using defaults! #{e}"
-    default_config.freeze
+    puts "Unable to read #{CONFIG_PATH}, using defaults! #{e}"
+    DEFAULTS
   end
 
-  def self.method_missing(method_name)
-    raise "Unknown config key '#{method_name}'" unless respond_to_missing?(method_name)
+  def self.method_missing(method_name, *args, &block)
+    return @@config[method_name] if @@config.key?(method_name)
 
-    @@config[method_name]
+    super
   end
 
-  def self.respond_to_missing?(method_name)
-    @@config.key?(method_name)
+  def self.respond_to_missing?(method_name, include_private = false)
+    @@config.key?(method_name) || super
   end
 end
 
@@ -68,14 +69,9 @@ module Log
   private
 
   def out(message, prefix, flag = :none)
-    message = message.to_s unless message.instance_of?(String)
-    message.split("\n").each do |line|
-      if flag == :nonl
-        print "#{prefix} #{line}"
-      else
-        puts "#{prefix} #{line}"
-      end
-    end
+    message = message.to_s unless message.is_a?(String)
+    printer = flag == :nonl ? method(:print) : method(:puts)
+    message.split("\n").each { |line| printer.call("#{prefix} #{line}") }
   end
 end
 
@@ -83,54 +79,45 @@ end
 module Git
   include Log
 
-  def initialize
-    super()
-    @wd = Dir.pwd
-  end
-
   def git_add(file:)
-    dirname = File.dirname(file)
-    basename = File.basename(file)
-    Dir.chdir(dirname)
-    log `git add "#{basename}"`
-    Dir.chdir(@wd)
+    Dir.chdir(File.dirname(file)) do
+      log `git add "#{File.basename(file)}"`
+    end
   end
 
   def git_rm(file:)
-    dirname = File.dirname(file)
-    basename = File.basename(file)
-    Dir.chdir(dirname)
-    log `git rm "#{basename}"`
-    Dir.chdir(@wd)
+    Dir.chdir(File.dirname(file)) do
+      log `git rm "#{File.basename(file)}"`
+    end
   end
 
   def git_status
-    Dir.chdir(Config.data_dir)
-    log `git status`
-    Dir.chdir(@wd)
+    Dir.chdir(Config.data_dir) do
+      log `git status`
+    end
   end
 
   def git_commit
-    Dir.chdir(Config.data_dir)
-    log `git commit -a -m 'Changing stuff, not telling what in commit history'`
-    Dir.chdir(@wd)
+    Dir.chdir(Config.data_dir) do
+      log `git commit -a -m 'Changing stuff, not telling what in commit history'`
+    end
   end
 
   def git_reset
-    Dir.chdir(Config.data_dir)
-    log `git reset --hard`
-    Dir.chdir(@wd)
+    Dir.chdir(Config.data_dir) do
+      log `git reset --hard`
+    end
   end
 
   def git_sync
     log "Synchronising #{Config.data_dir}"
-    Dir.chdir(Config.data_dir)
-    Config.sync_repos.each do |repo|
-      log `git pull #{repo} master`
-      log `git push #{repo} master`
+    Dir.chdir(Config.data_dir) do
+      Config.sync_repos.each do |repo|
+        log `git pull #{repo} master`
+        log `git push #{repo} master`
+      end
+      log `git status`
     end
-    log `git status`
-    Dir.chdir(@wd)
   end
 end
 
@@ -146,13 +133,13 @@ module Encryption
     pin = read_pin
     # Set up initialization vector
     iv = "#{pin * 2}#{Config.add_to_iv}#{pin * 2}"
-    @@iv = iv[0..15]
+    @@iv = iv.byteslice(0, 16)
     # ... and the encryption key!
     @@key = enforce_key_length(File.read(Config.key_file), Config.key_length)
   end
 
   def encrypt(plain:)
-    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
+    aes = OpenSSL::Cipher.new(Config.enc_alg)
     aes.encrypt
     aes.key = @@key
     aes.iv = @@iv
@@ -164,7 +151,7 @@ module Encryption
   end
 
   def decrypt(encrypted:)
-    aes = OpenSSL::Cipher::Cipher.new(Config.enc_alg)
+    aes = OpenSSL::Cipher.new(Config.enc_alg)
     aes.decrypt
     aes.key = @@key
     aes.iv = @@iv
@@ -174,19 +161,12 @@ module Encryption
     plain
   end
 
-  def test
-    plain_input = 'foo bar baz'
-    encrypted = encrypt(plain: plain_input)
-    plain = decrypt(encrypted: encrypted)
-    pp plain == plain_input
-  end
-
   private
 
   def enforce_key_length(key, force_size)
-    new_key = key
+    new_key = key.dup
     new_key += key while new_key.size < force_size
-    new_key[0..force_size - 1]
+    new_key[0, force_size]
   end
 
   def read_pin
@@ -211,13 +191,10 @@ class CommitFile
     end
 
     dirname = File.dirname(file)
-    unless File.directory?(dirname)
-      log "Creating #{dirname}"
-      FileUtils.mkdir_p(dirname)
-    end
+    FileUtils.mkdir_p(dirname) unless Dir.exist?(dirname)
 
     log "Writing #{file}"
-    File.open(file, 'w') { |fd| fd.write(content) }
+    File.write(file, content)
     git_add(file: file)
   end
 end
@@ -237,9 +214,12 @@ module Clipboard
     fatal "Can't paste to clipboard" if @clipboard_cmd.nil?
     user, password, other = extract(data.to_s)
     read, write = IO.pipe
-    spawn(@clipboard_cmd, in: read)
+    pid = spawn(@clipboard_cmd, in: read)
+    read.close
     write.write(password)
+    write.close
     puts other
+    Process.detach(pid)
     log "Pasted password for user '#{user}' to the clipboard"
   end
 
@@ -572,42 +552,33 @@ class CLI
   include Git
   include Log
 
+  COMMANDS = %w[
+    ls search cat paste get add export pathexport open edit import
+    import_r rm sync status commit reset fullcommit shred version
+    commands help shell exit last
+  ].freeze
+
+  SEARCH_ACTIONS = {
+    'cat' => :cat,
+    'paste' => :paste,
+    'export' => :export,
+    'pathexport' => :pathexport,
+    'edit' => :edit,
+    'open' => :open
+  }.freeze
+
   def initialize(interactive: false)
     super()
     @interactive = interactive
   end
 
   def commands
-    puts 'ls'
-    puts 'search'
-    puts 'cat'
-    puts 'paste'
-    puts 'get'
-    puts 'add'
-    puts 'export'
-    puts 'pathexport'
-    puts 'open'
-    puts 'edit'
-    puts 'import'
-    puts 'import_r'
-    puts 'rm'
-    puts 'sync'
-    puts 'status'
-    puts 'commit'
-    puts 'reset'
-    puts 'fullcommit'
-    puts 'shred'
-    puts 'version'
-    puts 'commands'
-    puts 'help'
-    puts 'shell'
-    puts 'exit'
-    puts 'last'
+    puts COMMANDS
     0
   end
 
   def help
-    log <<-HELP
+    log <<~HELP
       ls
       SEARCHTERM
       search SEARCHTERM
@@ -633,10 +604,10 @@ class CLI
     ec = 0
 
     loop do
-      if argv.length == 0 or @interactive
+      if argv.empty? || @interactive
         @interactive ||= true
         print '% '
-        argv = $stdin.gets.chomp.split(' ')
+        argv = $stdin.gets.chomp.split
       end
 
       geheim = Geheim.new
@@ -648,18 +619,8 @@ class CLI
              geheim.search(search_term: '.')
            when 'search'
              geheim.search(search_term: search_term)
-           when 'cat'
-             geheim.search(search_term: search_term, action: :cat)
-           when 'paste'
-             geheim.search(search_term: search_term, action: :paste)
-           when 'export'
-             geheim.search(search_term: search_term, action: :export)
-           when 'pathexport'
-             geheim.search(search_term: search_term, action: :pathexport)
-           when 'edit'
-             geheim.search(search_term: search_term, action: :edit)
-           when 'open'
-             geheim.search(search_term: search_term, action: :open)
+           when *SEARCH_ACTIONS.keys
+             geheim.search(search_term: search_term, action: SEARCH_ACTIONS[action])
            when 'add'
              geheim.add(description: search_term)
            when 'import'
