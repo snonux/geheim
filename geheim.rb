@@ -203,7 +203,10 @@ class CommitFile
   include Log
 
   def commit_content(file:, content:, force: false)
-    fatal "#{file} already exists" if File.exist?(file) && !force
+    if File.exist?(file) && !force
+      warn "#{file} already exists. Use 'force' flag to overwrite."
+      return false
+    end
 
     dirname = File.dirname(file)
     unless File.directory?(dirname)
@@ -589,6 +592,7 @@ class CLI
       help
       shell
     HELP
+    0
   end
 
   def shell_loop(argv)
